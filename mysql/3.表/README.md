@@ -417,3 +417,152 @@ Page Directory 中槽（Slot）的数量就会记录到 Page Header 中的 `PAGE
 为了校验页是否完整写入磁盘，InnoDB 就设置了 File Trailer 部分。File Trailer 中只有一个`FIL_PAGE_END_LSN`，占用8字节。`FIL_PAGE_END_LSN` 又分为两个部分。前4字节代表页的校验和，后4字节代表页面被最后修改时对应的日志序列位置（LSN）与File Header中的`FIL_PAGE_LSN`相同。
 
 将这两个值与File Header中的`FIL_PAGE_SPACE_OR_CHKSUM`和`FIL_PAGE_LSN`值进行比较，看是否一致（checksum的比较需要通过InnoDB的checksum函数来进行比较，不是简单的等值比较），以此来**保证页的完整性**。
+
+## 约束
+
+### 数据完整性
+
+关系型数据库通过约束（constraint）机制来保证数据库中数据的完整性。
+
+一般来说，数据完整性有以下三种形式：
+
+- **实体完整性**
+
+  **实体完整性保证表中有一个主键**。在InnoDB存储引擎表中，用户可以通过定义*Primary Key*或*Unique Key*约束来保证实体的完整性。用户还可以通过编写一个*触发器*来保证数据完整性。
+
+- **域完整性**
+
+  **域完整性保证数据每列的值满足特定的条件**。在InnoDB存储引擎表中，域完整性可以通过以下几种途径来保证：
+
+  - *选择合适的数据类型确保一个数据值满足特定条件*
+  - *外键（Foreign Key）约束*
+  - *编写触发器*
+  - *还可以考虑用DEFAULT约束作为强制域完整性的一个方面*
+
+- **参考完整性**
+
+  **参照完整性保证两张表之间的关系**。InnoDB存储引擎支持外键，因此允许用户定义*外键*以强制参照完整性，也可以通过编写*触发器*以强制执行。
+
+
+对于InnoDB存储引擎本身而言，提供了以下几种约束：
+
+- `Primary Key`
+- `Unique Key`
+- `Foreign Key`
+- `Default`
+- `NOT NULL`
+
+### 索引与约束
+
+当用户创建了一个唯一索引就创建了一个唯一的约束。但是约束和索引的概念还是有所不同的，约束更是一个逻辑的概念，用来保证数据的完整性，而索引是一个数据结构，既有逻辑上的概念，在数据库中还代表着物理存储的方式。
+
+### 对错误数据的约束
+
+在某些默认设置下，MySQL数据库允许非法的或不正确的数据的插入或更新，又或者可以在数据库内部将其转化为一个合法的值，如向`NOT NULL`的字段插入一个`NULL`值，MySQL数据库会将其更改为0再进行插入，因此数据库本身没有对数据的正确性进行约束。
+
+通过设置参数`sql_mode`的值为`STRICT_TRANS_TABLES`，这次MySQL数据库对于输入值的合法性进行了约束，而且针对不同的错误，提示的错误内容也都不同。
+
+### ENUM和SET约束
+
+对于离散类型的数值约束，MySQL可以通过`ENUM`和`SET`类型可以解决部分这样的约束需求。
+
+### 触发器与约束
+
+触发器的作用是在执行`INSERT`、`DELETE`和`UPDATE`命令之前或之后自动调用SQL命令或存储过程。
+
+创建触发器的命令是`CREATE TRIGGER`，只有具备Super权限的MySQL数据库用户才可以执行这条命令：
+
+```sql
+CREATE
+    [DEFINER = user]
+    TRIGGER [IF NOT EXISTS] trigger_name
+    trigger_time trigger_event
+    ON tbl_name FOR EACH ROW
+    [trigger_order]
+    trigger_body
+
+trigger_time: { BEFORE | AFTER }
+
+trigger_event: { INSERT | UPDATE | DELETE }
+
+trigger_order: { FOLLOWS | PRECEDES } other_trigger_name
+```
+
+最多可以为一个表建立6个触发器，即分别为`INSERT`、`UPDATE`、`DELETE`的`BEFORE`和`AFTER`各定义一个。`BEFORE`和`AFTER`代表触发器发生的时间，表示是在每行操作的之前发生还是之后发生。
+
+通过触发器，用户可以实现MySQL数据库本身并不支持的一些特性，如**对于传统`CHECK`约束的支持**，**物化视图**、**高级复制**、**审计等特性**。
+
+### 外键约束
+
+外键用来保证参照完整性，MySQL数据库的MyISAM存储引擎本身并不支持外键，对于外键的定义只是起到一个注释的作用。而InnoDB存储引擎则完整支持外键约束。外键的定义如下：
+
+```sql
+[CONSTRAINT [symbol]] FOREIGN KEY
+    [index_name] (col_name, ...)
+    REFERENCES tbl_name (col_name,...)
+    [ON DELETE reference_option]
+    [ON UPDATE reference_option]
+
+reference_option:
+    RESTRICT | CASCADE | SET NULL | NO ACTION | SET DEFAULT
+```
+
+用户可以在执行`CREATE TABLE`时就添加外键，也可以在表创建后通过`ALTER TABLE`命令来添加。
+
+一般来说，称被引用的表为**父表**，引用的表称为**子表**。外键定义时的`ON DELETE`和`ON UPDATE`表示在对父表进行`DELETE`和`UPDATE`操作时，对子表所做的操作，可定义的子表操作有：
+
+- `CASCADE`
+
+  `CASCADE`表示当父表发生`DELETE`或`UPDATE`操作时，对相应的子表中的数据也进行`DELETE`或`UPDATE`操作。
+- `SET NULL`
+
+  `SET NULL`表示当父表发生`DELETE`或`UPDATE`操作时，相应的子表中的数据被更新为`NULL`值(要注意子表的外键列不能为`NOT NULL`)  
+- `NO ACTION`
+  `NO ACTION`表示当父表发生`DELETE`或`UPDATE`操作时，抛出错误，不允许这类操作发生。
+- `RESTRICT`
+  `RESTRICT`表示当父表发生`DELETE`或`UPDATE`操作时，抛出错误，不允许这类操作发生。如果定义外键时没有指定`ON DELETE`或`ON UPDATE`，`RESTRICT`就是默认的外键设置。
+
+从上面的定义可以看出，在MySQL数据库中`NO ACTION`和`RESTRICT`的功能是相同的。
+
+在其他数据库中，如Oracle数据库，有一种称为**延时检查（deferred check）**的外键约束，即检查在SQL语句运行完成后再进行。而目前MySQL数据库的外键约束都是**即时检查（immediate check）**。
+
+在Oracle数据库中，对于建立外键的列，一定不要忘记给这个列加上一个索引。而InnoDB存储引擎在外键建立时会*自动地对该列加一个索引*。因此可以很好地避免外键列上无索引而导致的**死锁**问题的产生。
+
+对于参照完整性约束，外键能起到一个非常好的作用。但是对于数据的导入操作时，外键往往导致在外键约束的检查上**花费大量时间**。因为MySQL数据库的外键是即时检查的，所以对导入的每一行都会进行外键检查。
+
+## 视图
+
+在MySQL数据库中，视图（View）是一个命名的**虚表**，它由一个SQL查询来定义，可以当做表使用。与持久表（permanent table）不同的是，*视图中的数据没有实际的物理存储*。
+
+### 视图的作用
+
+视图的主要用途之一是被用做一个抽象装置，特别是对于一些应用程序，**程序本身不需要关心基表（base table）的结构，只需要按照视图定义来取数据或更新数据**，因此，视图同时在一定程度上起到一个安全层的作用。
+
+虽然视图是基于基表的一个虚拟表，但是用户可以对某些视图进行**更新操作**，其本质就是*通过视图的定义来更新基本表*。一般称可以进行更新操作的视图为**可更新视图（updatable view）**。视图定义中的`WITH CHECK OPTION`就是针对于可更新的视图的，即更新的值是否需要检查。
+
+### 物化视图
+
+Oracle数据库支持**物化视图**——该视图不是基于基表的虚表，而是根据基表实际存在的实表，即**物化视图的数据存储在非易失的存储设备上**。物化视图可以用于预先计算并保存多表的链接（JOIN）或聚集（GROUP BY）等耗时较多的SQL操作结果。这样，在执行复杂查询时，就可以避免进行这些耗时的操作，从而快速得到结果。*物化视图的好处是对于一些复杂的统计类查询能直接查出结果*。
+
+在Oracle数据库中，物化视图的创建方式包括以下两种：
+
+- `BUILD IMMEDIATE`是默认的创建方式，在创建物化视图的时候就生成数据
+- `BUILD DEFERRED`在创建物化视图时不生成数据，以后根据需要再生成数据。
+
+**查询重写**是指当对物化视图的基表进行查询时，数据库会自动判断能否通过查询物化视图来直接得到最终的结果，如果可以，则避免了聚集或连接等这类较为复杂的SQL操作，直接从已经计算好的物化视图中得到所需的数据。
+
+**物化视图的刷新**是指当基表发生了DML操作后，物化视图何时采用哪种方式和基表进行同步。刷新的模式有两种：
+
+- `ON DEMAND`意味着物化视图在用户需要的时候进行刷新
+- `ON COMMIT`意味着物化视图在对基表的DML操作提交的同时进行刷新
+
+而**刷新的方法**有四种：
+
+- `FAST`：刷新采用增量刷新，只刷新自上次刷新以后进行的修改
+- `COMPLETE`：刷新是对整个物化视图进行完全的刷新
+- `FORCE`：如果选择`FORCE`方式，则数据库在刷新时会去判断是否可以进行快速刷新，如果可以，则采用`FAST`方式，否则采用`COMPLETE`的方式
+- `NEVER`：指物化视图不进行任何刷新
+
+**MySQL数据库本身并不支持物化视图**，换句话说，MySQL数据库中的视图总是虚拟的。但是用户可以通过一些机制来实现物化视图的功能。例如要创建一个`ON DEMAND`的物化视图还是比较简单的，用户只需定时把数据导入到另一张表；而如果要创建一个`ON COMMIT`的物化视图则需要在基表发生INSERT、UPDATE和DELETE操作时创建相应的触发器导入数据。
+
+通过触发器，在MySQL数据库中实现了类似物化视图的功能。但是MySQL数据库本身并不支持物化视图，因此对于物化视图支持的**查询重写（Query Rewrite）功能就显得无能为**力，用户只能在应用程序端做一些控制。
