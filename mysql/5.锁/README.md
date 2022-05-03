@@ -235,6 +235,8 @@ ReadView的组成：
 
 ### 自增长与锁
 
+参考:[深入剖析 MySQL 自增锁](https://juejin.cn/post/6968420054287253540)
+
 在InnoDB存储引擎的内存结构中，对每个含有自增长值的表都有一个**自增长计数器（auto-increment counter）**。当对含有自增长的计数器的表进行插入操作时，这个计数器会被初始化，执行如下的语句来得到计数器的值：
 
 ```sql
@@ -309,3 +311,154 @@ SELECT AUTO_INCREMENT FROM information_schema.TABLES where TABLE_SCHEMA = 'datab
 ![外键测试用例](imgs/%E5%A4%96%E9%94%AE%E6%B5%8B%E8%AF%95%E7%94%A8%E4%BE%8B.png)
 
 在上述的例子中，两个会话中的事务都没有进行`COMMIT`或`ROLLBACK`操作，而会话B的操作会被阻塞。这是因为`id`为`3`的父表在会话A中已经加了一个X锁，而此时在会话B中用户又需要对父表中id为3的行加一个S锁，这时INSERT的操作会被阻塞。设想如果访问父表时，使用的是一致性的非锁定读，这时Session B会读到父表有`id=3`的记录，可以进行插入操作。但是如果会话A对事务提交了，则父表中就不存在`id`为`3`的记录。数据在父、子表就会存在不一致的情况。
+
+
+## 锁的算法
+
+参考：
+
+1. [MySQL InnoDB锁类型](https://www.jianshu.com/p/6e815c767602)
+2. [InnoDB Locking](https://dev.mysql.com/doc/refman/8.0/en/innodb-locking.html)
+
+InnoDB存储引擎有3种行锁的算法，其分别是：
+
+- `Record Lock`：**记录锁**是单个行记录上的锁
+    - `LOCK_MODE`: `S,REC_NOT_GAP` / `X,REC_NOT_GAP`
+- `Gap Lock`：**间隙锁**，锁定一个范围，但不包含记录本身。RR特有
+    - `REPEATABLE-READ`隔离级别特有
+    - `LOCK_MODE`: `S,GAP` / `X,GAP`
+- `Next-Key Lock`：**临键锁**是索引记录上的记录锁和索引记录之前的间隙上的间隙锁的组合（Gap Lock + Record Lock）。
+    - 应为间隙锁是`REPEATABLE-READ`隔离级别特有，所以临键锁也是
+    - InnoDB存储引擎在索引上的当前读（`SELECT ... FOR UPDATE` / `SELECT ... LOCK IN SHARE MODE`）都是使用临键锁来进行锁定的，其设计目的是为了解决当前读的幻读问题。
+    - 唯一索引的临键锁会被优化为记录锁
+    - 如果索引值命中多个，则都加上临键锁。例如`i`值为`8`, `10`, `10`, `11`, `18`，当使用`where i=10 for update`条件时，两个`i=10`的临键锁区间为`(8,10]`和`(10,10]`。
+    - `LOCK_MODE`: `S` / `X`
+
+
+### 演示
+
+新建表`z`，表`z`中存在一个主键索引和一个二级索引`idx_b`和然后随便创建数据放入表中。
+
+```sql
+-- 创建表
+CREATE TABLE z (
+    a INT,
+    b INT,
+    PRIMARY KEY (a),
+    KEY idx_b (b)
+);
+
+-- 插入数据
+INSERT INTO z VALUES (1, 101), (2, 102), (3, 103),(4, 103), (5, 104), (6, 105);
+```
+
+开启事务后，使用当前读（X锁）通过辅助索引`idx_b`进行查询。
+
+```sql
+begin;
+SELECT * FROM z where b = 103 FOR UPDATE;
+```
+
+访问`performance_schema`数据库下的`data_locks`表查看表信息。
+
+```sql
+SELECT OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, LOCK_TYPE, LOCK_MODE, LOCK_DATA FROM performance_schema.data_locks;
+```
+
+查询结果如下表所示，第一行的表意向锁IX暂不考虑，接下来的两行数据分别表示临键锁对应的区间分别为 (102 ,103] 和 (103, 103]，需要注意的是因为在`idx_b`索引上有两个103，所以创建两个**临键锁**。InnoDB存储引擎还会对辅助索引的下一个键值区间(103, 104)加上一个**区间锁**，用于防止该区间内的幻读问题。除此之外在主键索引上还需要将103对应的主键索引上的记录id分别对应3和4的记录加两个**记录锁**，防止其他事务对其进行修改操作。
+
+```
+# OBJECT_SCHEMA	OBJECT_NAME	INDEX_NAME	LOCK_TYPE	LOCK_MODE	LOCK_DATA
+employees	z		TABLE	IX	
+employees	z	idx_b	RECORD	X	103, 3
+employees	z	idx_b	RECORD	X	103, 4
+employees	z	PRIMARY	RECORD	X,REC_NOT_GAP	3
+employees	z	PRIMARY	RECORD	X,REC_NOT_GAP	4
+employees	z	idx_b	RECORD	X,GAP	104, 5
+```
+
+### 唯一索引锁降级
+
+> 当查询的索引含有唯一属性（唯一索引）时，InnoDB存储引擎会对临键锁进行优化，将其降级为记录锁，即锁住索引本身，而不是范围。
+> ——《MySQL技术内幕 InooDB存储引擎》
+
+那么问题来了，为什么唯一索引的临键锁可以降级为记录所呢？
+
+要解答这个问题，首先要搞清楚引入临键锁的意义。引入临键锁的目的是为避免幻读问题。所谓幻读就是一个事务中两个相同读取操作中，第二次读取比第一次读取多出了其他事务插入的数据。为了解决这个问题在第一次读取的时候，数据库应该做到将插入能够导致幻读的索引区间加锁，来预防幻读的发生。
+
+以上表`z`为例，在插入完数据之后的索引idx_b索引记录如下图。
+
+![idx_b索引记录](imgs/idx_b%E7%B4%A2%E5%BC%95%E8%AE%B0%E5%BD%95.drawio.png)
+
+当用户事务A开启事务执行如下查询时，会查询到`idx_b`索引中索引键为103的主键，~再根据主键进行回表查询获取记录信息~通过覆盖索引获取查询信息即可。如果其他事务插入数据，那么只有插入 `b = 103` 条件的记录才能导致幻读，而 `b = 103` 的记录可能插入的位置为 idx_b 索引中`(102, 104)` 区间中，所以只要把这个区间上加锁就可以避免幻读的发生。
+
+```sql
+-- 事务A
+BEGIN;
+SELECT * FROM z WHERE b = 103 FOR UPDATE;
+```
+
+访问`performance_schema`数据库下的`data_locks`表查看锁信息，看看InnoDB时怎么做的。可见InnoDB会为`idx_b`索引添加`(102, 103]`区间的临键锁、`(103, 103]`区间的临键锁和`(103, 104)`区间的间隙锁来防止其他事务的插入进而造成幻读像现象。得到如下结果：
+
+![idx_b加锁情况](imgs/idx_b%E5%8A%A0%E9%94%81%E6%83%85%E5%86%B5.drawio.png)
+
+如果此时事务B插入了一条数据，这条数据可能会被插入至`(102, 103)`、`(103, 103)`或者`(103, 104)`区间，但是这些区间上都被加上了X锁，无法插入，需要等待事务A释放锁之后才能进行插入。
+
+```sql
+-- 事务B
+BEGIN;
+INSERT INTO z VALUES (7, 103);
+```
+
+但是对于唯一索引，我们新建一张新表`y`，表主键`a`，唯一键`b`。随便构造些数据插入表中。
+
+```sql
+CREATE TABLE y (
+    a INT,
+    b INT,
+    PRIMARY KEY (a),
+    KEY uniq_key (b)
+);
+
+INSERT INTO y VALUES (1, 101), (2, 103), (3, 105), (4, 107), (5, 109);
+```
+
+如果此时开启一个事务，执行执行当前读（X锁）查询`b = 105`条件的数据。
+
+```sql
+BEGIN;
+SELECT * FROM y WHERE b = 105 FOR UPDATE;
+```
+
+访问`performance_schema`数据库下的`data_locks`表查看锁信息，发现InnoDB只为`unique_key`索引添加了记录锁，而并不是像非唯一索引一样，将原本的(103, 105]临键锁和(105，107)间隙锁降级为105的记录锁。究其原因就是因为唯一索引只会将不会重复插入`b = 105`的记录，因为存在唯一性约束，所以只添加了记录锁防止索引记录并发修改。
+
+提交上述事务之后，开启一个新的事务执行如下查询：
+
+```sql
+BEGIN;
+SELECT * FROM y WHERE b BETWEEN 103 and 107 FOR UPDATE;
+```
+
+想一想，如果要避免幻读的发生，只需要避免满足`b BETWEEN 103 and 107`条件的记录的插入，所以需要对[103, 107]区间加锁。对于边界值`b = 103`或`b = 107`的插入，因为是b是唯一索引，为了满足唯一性约束，并不会插入至103记录之前和107记录之后，所以并不需要锁103之前和107之后的区间。但是InnoDB仍然在区间添加锁（个人认为可以进行优化）。
+
+### 区间锁显示关闭
+
+因为区间锁是RR隔离级别特有的锁，可以将隔离级别设置为`READ COMMITTED`来显示关闭间隙锁。关闭之后，同样执行如下查询。
+
+```sql
+begin;
+SELECT * FROM z where b = 103 FOR UPDATE;
+SELECT OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, LOCK_TYPE, LOCK_MODE, LOCK_DATA FROM performance_schema.data_locks;
+```
+
+可以发现`LOCK_TYPE`为`RECORD`的锁都是`X,REC_NOT_GAP`，即记录锁。并没有出现间隙锁或者临键锁。
+
+```
+# OBJECT_SCHEMA	OBJECT_NAME	INDEX_NAME	LOCK_TYPE	LOCK_MODE	LOCK_DATA
+employees	z		TABLE	IX	
+employees	z	idx_b	RECORD	X,REC_NOT_GAP	103, 3
+employees	z	idx_b	RECORD	X,REC_NOT_GAP	103, 4
+employees	z	PRIMARY	RECORD	X,REC_NOT_GAP	3
+employees	z	PRIMARY	RECORD	X,REC_NOT_GAP	4
+```
+
