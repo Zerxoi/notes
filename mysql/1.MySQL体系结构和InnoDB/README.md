@@ -41,45 +41,44 @@ MySQL 体系结构参考：[MySQL体系架构简介](https://cxis.me/2018/04/07/
 
 1. Master Thread
 
-Master Thread是一个非常核心的后台线程。主要负责将缓冲池中的数据异步刷新到磁盘，保证数据的一致性。
+    Master Thread是一个非常核心的后台线程。主要负责将缓冲池中的数据异步刷新到磁盘，保证数据的一致性。
 
-- 脏页的刷新（1.2.x 迁移至 Page Cleaner Thread）
-- 合并插入缓冲（INSERT BUFFER）
-- UNDO页的回收等。
+    - 脏页的刷新（1.2.x 迁移至 Page Cleaner Thread）
+    - 合并插入缓冲（INSERT BUFFER）
+    - UNDO页的回收等。
 
 2. IO Thread
 
-在InnoDB存储引擎中大量使用了AIO（Async IO）来处理写IO请求，这样可以极大提高数据库的性能。而IO Thread的工作主要是负责这些IO请求的回调（call back）处理。InnoDB 1.0版本之前共有4个IO Thread，分别是write、read、insert buffer和log IO thread。
+    在InnoDB存储引擎中大量使用了AIO（Async IO）来处理写IO请求，这样可以极大提高数据库的性能。而IO Thread的工作主要是负责这些IO请求的回调（call back）处理。InnoDB 1.0版本之前共有4个IO Thread，分别是write、read、insert buffer和log IO thread。
 
-
-```SQL
--- 查看 InnoDB 版本
-SHOW VARIABLES LIKE 'innodb_version';
--- 在 FILE I/O 中查看 IO线程
-SHOW ENGINE INNODB STATUS；
-```
+    ```SQL
+    -- 查看 InnoDB 版本
+    SHOW VARIABLES LIKE 'innodb_version';
+    -- 在 FILE I/O 中查看 IO线程
+    SHOW ENGINE INNODB STATUS；
+    ```
 
 3. Pruge Thread
 
-事务被提交后，其所使用的undolog可能不再需要，因此需要PurgeThread来回收已经使用并分配的undo页。在InnoDB 1.1版本之前，purge操作仅在InnoDB存储引擎的Master Thread中完成。用户可以在MySQL数据库的配置文件中添加如下命令来启用独立的Purge Thread：
+    事务被提交后，其所使用的undolog可能不再需要，因此需要PurgeThread来回收已经使用并分配的undo页。在InnoDB 1.1版本之前，purge操作仅在InnoDB存储引擎的Master Thread中完成。用户可以在MySQL数据库的配置文件中添加如下命令来启用独立的Purge Thread：
 
-```cnf
-[mysqld]
-innodb_purge_threads=1
-```
+    ```cnf
+    [mysqld]
+    innodb_purge_threads=1
+    ```
 
-而从InnoDB 1.1版本开始，purge操作可以独立到单独的线程中进行，以此来减轻Master Thread的工作，从而提高CPU的使用率以及提升存储引擎的性能。但是在1.1版本只能设置一个。
+    而从InnoDB 1.1版本开始，purge操作可以独立到单独的线程中进行，以此来减轻Master Thread的工作，从而提高CPU的使用率以及提升存储引擎的性能。但是在1.1版本只能设置一个。
 
-从InnoDB 1.2版本开始，InnoDB支持多个Purge Thread，这样做的目的是为了进一步加快undo页的回收。
+    从InnoDB 1.2版本开始，InnoDB支持多个Purge Thread，这样做的目的是为了进一步加快undo页的回收。
 
-```sql
--- 查看剪枝线程
-SHOW VARIABLES LIKE'innodb_purge_threads';
-```
+    ```sql
+    -- 查看剪枝线程
+    SHOW VARIABLES LIKE'innodb_purge_threads';
+    ```
 
 4. Page Cleaner Thread
 
-Page Cleaner Thread是在InnoDB 1.2.x版本中引入的。其作用是将之前版本中脏页的刷新操作都放入到单独的线程中来完成。而其目的是为了减轻原Master Thread的工作及对于用户查询线程的阻塞，进一步提高InnoDB存储引擎的性能。
+    Page Cleaner Thread是在InnoDB 1.2.x版本中引入的。其作用是将之前版本中脏页的刷新操作都放入到单独的线程中来完成。而其目的是为了减轻原Master Thread的工作及对于用户查询线程的阻塞，进一步提高InnoDB存储引擎的性能。
 
 ### 内存
 

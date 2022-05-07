@@ -9,7 +9,7 @@
 在默认情况下，MySQL实例会按照一定的顺序在指定的位置进行读取，用户只需通过命令`mysql--help|grep my.cnf`来寻找即可。
 
 数据库参数可以看成一个键/值（key/value）对。
-    
+
 - 可以通过命令`SHOW VARIABLES`查看数据库中的所有参数，也可以通过`LIKE`来过滤参数名。**(推荐)**
 - 从MySQL 5.1版本开始，还可以通过`information_schema`架构下的`GLOBAL_VARIABLES`视图来进行查找。
 
@@ -22,14 +22,13 @@ MySQL数据库中的参数可以分为两类：
 
 动态参数意味着可以在MySQL实例运行中进行更改，静态参数说明在整个实例生命周期内都不得进行更改，就好像是只读（read only）的。可以通过SET命令对动态的参数值进行修改，SET的语法如下：
 
-```
+```sql
 SET
 |[global|session]system_var_name=expr
 |[@@global.|@@session.|@@]system_var_name=expr
 ```
 
 这里可以看到global和session关键字，它们表明该参数的修改是基于当前会话还是整个实例的生命周期。有些动态参数只能在会话中进行修改，如autocommit；而有些参数修改完后，在整个实例生命周期中都会生效，如binlog_cache_size；而有些参数既可以在会话中又可以在整个实例的生命周期内生效，如read_buffer_size。
-
 
 ### 日志文件
 
@@ -80,7 +79,6 @@ InnoSQL版本加强了对于SQL语句的捕获方式。在原版MySQL的基础�
 - **复制（replication）**：其原理与恢复类似，通过复制和执行二进制日志使一台远程的MySQL数据库（一般称为slave或standby）与一台MySQL数据库（一般称为master或primary）进行实时同步。
 - **审计（audit）**：用户可以通过二进制日志中的信息来进行审计，判断是否有对数据库进行注入的攻击。
 
-
 二进制日志文件在默认情况下并没有启动，需要手动指定参数来启动。通过配置参数`log-bin[=name]`可以启动二进制日志。如果不指定`name`，则默认二进制日志文件名为主机名，后缀名为二进制日志的序列号，所在路径为数据库所在目录（`datadir`参数)。
 
 以下配置文件的参数影响着二进制日志记录的信息和行为：
@@ -92,7 +90,7 @@ InnoSQL版本加强了对于SQL语句的捕获方式。在原版MySQL的基础�
 - **binlog_cache_size**
 
     当使用事务的表存储引擎（如InnoDB存储引擎）时，所有未提交（uncommitted）的二进制日志会被记录到一个缓存中去，等该事务提交（committed）时直接将缓冲中的二进制日志写入二进制日志文件，而该缓冲的大小由`binlog_cache_size`决定，默认大小为32K。
-    
+
     `binlog_cache_size`是基于会话（session）的，也就是说，当一个线程开始一个事务时，MySQL会自动分配一个大小为`binlog_cache_size`的缓存，因此该值的设置需要相当小心，不能设置过大。当一个事务的记录大于设定的`binlog_cache_size`时，MySQL会把缓冲中的日志写入一个*临时文件*中，因此该值又不能设得太小。
 
     通过`show global status like'binlog_cache%'`命令查看`binlog_cache_use`、`binlog_cache_disk_use`的状态，可以判断当前`binlog_cache_size`的设置是否合适。其中，`binlog_cache_use`记录了使用缓冲写二进制日志的次数，`binlog_cache_disk_use`记录了使用*临时文件*写二进制日志的次数。
@@ -100,7 +98,7 @@ InnoSQL版本加强了对于SQL语句的捕获方式。在原版MySQL的基础�
 - **sync_binlog**
 
     在默认情况下，二进制日志并不是在每次写的时候同步到磁盘（用户可以理解为缓冲写）。因此，当数据库所在操作系统发生宕机时，可能会有最后一部分数据没有写入二进制日志文件中，这会给恢复和复制带来问题。参数`sync_binlog=[N]`表示每写缓冲多少次就同步到磁盘。
-    
+
     `sync_binlog`的默认值为`0`，表示MySQL不控制binlog的刷新，由文件系统自己控制它的缓存的刷新。这时候的性能是最好的，但是风险也是最大的。因为一旦系统Crash，在binlog_cache中的所有binlog信息都会被丢失。
 
     如果将N设为1，即`sync_binlog=1`表示采用同步写磁盘的方式来写二进制日志，这时写操作不使用操作系统的缓冲来写二进制日志。但是，即使将`sync_binlog`设为1，还是会有一种情况导致问题的发生。当使用InnoDB存储引擎时，在一个事务发出COMMIT动作之前，由于`sync_binlog`为1，因此会将二进制日志立即写入磁盘。如果这时已经写入了二进制日志，但是提交还没有发生，并且此时发生了宕机，那么在MySQL数据库下次启动时，由于COMMIT操作并没有发生，这个事务会被回滚掉。但是二进制日志已经记录了该事务信息，不能被回滚。**这个问题可以通过将参数`innodb_support_xa`设为1来解决，虽然`innodb_support_xa`与XA事务有关，但它同时也确保了二进制日志和InnoDB存储引擎数据文件的同步。**
@@ -116,11 +114,11 @@ InnoSQL版本加强了对于SQL语句的捕获方式。在原版MySQL的基础�
 - **binlog_format**
 
     `binlog_format`参数十分重要，它影响了记录二进制日志的格式。
-    
+
     在MySQL 5.1版本之前，没有这个参数。所有二进制文件的格式都是基于SQL语句（STATEMENT）级别的。如果使用二进制日志级别为STATEMENT级别会有如下问题：
 
-    - 对于复制是有一定要求的。如在主服务器运行`rand`、`uuid`等函数，又或者使用触发器等操作，这些都可能会导致主从服务器上表中数据的**不一致**（not sync）
-    - InnoDB存储引擎的默认事务隔离级别是`REPEATABLE READ`。这其实也是因为二进制日志文件格式的关系，如果使用`READ COMMITTED`的事务隔离级别，会出现类似丢失更新的现象，从而出现主从数据库上的数据不一致。
+  - 对于复制是有一定要求的。如在主服务器运行`rand`、`uuid`等函数，又或者使用触发器等操作，这些都可能会导致主从服务器上表中数据的**不一致**（not sync）
+  - InnoDB存储引擎的默认事务隔离级别是`REPEATABLE READ`。这其实也是因为二进制日志文件格式的关系，如果使用`READ COMMITTED`的事务隔离级别，会出现类似丢失更新的现象，从而出现主从数据库上的数据不一致。
 
     MySQL 5.1开始引入了binlog_format参数，该参数可设的值有STATEMENT、ROW和MIXED。
 
@@ -137,6 +135,7 @@ InnoSQL版本加强了对于SQL语句的捕获方式。在原版MySQL的基础�
     `binlog_format`是动态参数，因此可以在数据库运行环境下进行更改。在通常情况下，我们将参数`binlog_format`设置为`ROW`，这可以为数据库的恢复和复制带来更好的可靠性。但是不能忽略的一点是，这会带来二进制文件大小的增加，有些语句下的`ROW`格式可能需要更大的容量。而由于复制是采用传输二进制日志方式实现的，因此复制的网络开销也有所增加。
 
     二进制日志文件的文件格式为二进制，不能像错误日志文件、慢查询日志文件那样直接查看。要查看二进制日志文件的内容，必须通过MySQL提供的工具`mysqlbinlog`来查看看执行的SQL语句。
+
 #### 套接字文件
 
 在UNIX系统下本地连接MySQL可以采用UNIX域套接字方式，这种方式需要一个套接字（socket）文件。套接字文件可由参数socket控制。一般在`/tmp`目录下，名为`mysql.sock`。
@@ -159,7 +158,7 @@ InnoDB采用将存储的数据按表空间（tablespace）进行存放的设计�
 
 默认情况下InnoDB存储引擎有一个**共享表空间**`ibdata1`，即所有数据都放在这个表空间内。用户可以通过参数`innodb_data_file_path`对其进行设置，格式如下：
 
-```
+```text
 innodb_data_file_path=datafle_spec1[;datafle_spec2]...
 ```
 
@@ -194,7 +193,6 @@ innodb_data_file_path=datafle_spec1[;datafle_spec2]...
 - **innodb_log_group_home_dir**
 
 参数`innodb_log_group_home_dir`指定了日志文件组所在路径，默认为`./`，表示在MySQL数据库的数据目录下。
-
 
 重做日志文件的大小设置对于InnoDB存储引擎的性能有着非常大的影响。
 
@@ -235,8 +233,8 @@ innodb_data_file_path=datafle_spec1[;datafle_spec2]...
 - 事务提交时刷新，由`innodb_flush_log_at_trx_commit`参数控制
 - 重做日志缓冲池剩余空间小于1/2时刷新
 
-
 参数`innodb_flush_log_at_trx_commit`的有效值有0、1、2。
+
 - 0代表当提交事务时，并不将事务的重做日志写入磁盘上的日志文件，而是等待主线程每秒的刷新。
 - 1表示在执行commit时将重做日志缓冲同步写到磁盘，即伴有fsync的调用。
 - 2表示将重做日志异步写到磁盘，即写到文件系统的缓存中。因此不能完全保证在执行commit时肯定会写入重做日志文件，只是有这个动作发生。
