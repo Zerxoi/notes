@@ -20,14 +20,13 @@ B+ 树是一种树数据结构，通常用于数据库和操作系统的文件�
 
 ![一棵高度为2的B+树](imgs/%E4%B8%80%E6%A3%B5%E9%AB%98%E5%BA%A6%E4%B8%BA2%E7%9A%84B%2B%E6%A0%91.png)
 
-
-**B+树的插入操作**
+#### B+树的插入操作
 
 B+树的插入必须保证插入后叶子节点中的记录依然排序，同时需要考虑插入到B+树的三种情况，每种情况都可能会导致不同的插入算法。
 
 ![B+树插入的3种情况](imgs/B%2B%E6%A0%91%E6%8F%92%E5%85%A5%E7%9A%843%E7%A7%8D%E6%83%85%E5%86%B5.png)
 
-**B+树的删除操作**
+#### B+树的删除操作
 
 B+树使用填充因子（fill factor）来控制树的删除变化，50%是填充因子可设的最小值。B+树的删除操作同样必须保证删除后叶子节点中的记录依然排序，同插入一样，B+树的删除操作同样需要考虑以下表中的三种情况，与插入不同的是，删除根据填充因子的变化来衡量。
 
@@ -70,7 +69,7 @@ InnoDB存储引擎表是**索引组织表**，即表中数据按照主键顺序�
 
 ![辅助索引分析](imgs/%E8%BE%85%E5%8A%A9%E7%B4%A2%E5%BC%95%E5%88%86%E6%9E%90.png)
 
-**堆表**
+#### 堆表
 
 对于其他的一些数据库，如Microsoft SQL Server数据库，其有一种称为**堆表**的表类型，即行数据的存储按照插入的顺序存放。这与MySQL数据库的MyISAM存储引擎有些类似。堆表的特性决定了堆表上的索引都是非聚集的，主键与非主键的区别只是是否唯一且非空（NOT NULL）。因此这时书签是一个行标识符（Row Identifiedr，RID），可以用如“文件号：页号：槽号”的格式来定位实际的行数据。
 
@@ -80,17 +79,17 @@ InnoDB存储引擎表是**索引组织表**，即表中数据按照主键顺序�
 
 ### B+树索引的分裂
 
-**存在的问题**
+**存在的问题**: B+树索引页的分裂并不总是从页的中间记录开始，这样可能会导致页空间的浪费。
 
-B+树索引页的分裂并不总是从页的中间记录开始，这样可能会导致页空间的浪费。例如下面的记录：
+例如下面的记录：
 
-```
+```text
 P1: 1、2、3、4、5、6、7、8、9
 ```
 
 插入是根据自增顺序进行的，若这时插入10这条记录后需要进行页的分裂操作，那么根据B+树的分裂方法，会将记录5作为**分裂点记录（split record）**，分裂后得到下面两个页：
 
-```
+```text
 P1：1、2、3、4
 P2：5、6、7、8、9、10
 ```
@@ -287,20 +286,19 @@ insert into t select 3,2;
 
 联合索引的第二个好处是已经对第二个键值进行了排序处理。通过`explain select * from t where a = 1 order by b;`得到如下结果：
 
-```
-# id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t		ref	idx_a,idx_a_b	idx_a_b	4	const	2	100.00	Using index
+```text
+# id select_type table partitions type possible_keys key key_len ref rows filtered Extra
+1 SIMPLE t  ref idx_a,idx_a_b idx_a_b 4 const 2 100.00 Using index
 ```
 
 对于上述的SQL语句既可以使用`idx_a`索引，也可以使用`idx_a_b`索引。但是优化器使用了`idx_a_b`索引，因为这个联合索引中b字段已经排好序了。根据该联合索引取出数据，无须再对`b`做一次额外的排序操作。如果通过`explain select * from t force index(idx_a) where a = 1 order by b;`强制使用`idx_a`索引，执行计划下表所示。
 
-```
-# id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t		ref	idx_a	idx_a	4	const	2	100.00	Using filesort
+```text
+# id select_type table partitions type possible_keys key key_len ref rows filtered Extra
+1 SIMPLE t  ref idx_a idx_a 4 const 2 100.00 Using filesort
 ```
 
 在Extra选项中可以看到`Using filesort`，即需要额外的一次排序操作才能完成查询。
-
 
 正如前面所介绍的那样，联合索引`（a，b）`其实是根据列a、b进行排序，因此下列语句可以直接使用联合索引得到结果：
 
@@ -308,13 +306,13 @@ insert into t select 3,2;
 SELECT...FROM TABLE WHERE a=xxx ORDER BY b
 ```
 
-
 然而对于联合索引`（a，b，c）`来说，下列语句同样可以直接通过联合索引得到结果：
 
 ```sql
 SELECT...FROM TABLE WHERE a=xxx ORDER BY b
 SELECT...FROM TABLE WHERE a=xxx AND b=xxx ORDER BY c
 ```
+
 但是对于下面的语句，联合索引不能直接得到结果，其还需要执行一次filesort排序操作，因为索引`（a，c）`并未排序：
 
 ```sql
@@ -342,9 +340,9 @@ EXPLAIN SELECT COUNT(*) FROM t;
 
 由于t表上还有辅助索引，而辅助索引远小于聚集索引，选择辅助索引可以减少IO操作，故优化器的选择为`idx_a`。可以看到，`possible_keys`列为`NULL`，但是实际执行时优化器却选择了`idx_a`索引，而列`Extra`列的`Using index`就是代表了优化器进行了覆盖索引操作。
 
-```
-# id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	t		index		idx_a	4		6	100.00	Using index
+```text
+# id select_type table partitions type possible_keys key key_len ref rows filtered Extra
+1 SIMPLE t  index  idx_a 4  6 100.00 Using index
 ```
 
 ### 优化器选择不使用索引的情况（不能覆盖索引+大量数据）
@@ -397,7 +395,6 @@ index_list:
 
 - `USE INDEX`只是告诉优化器可以选择该索引，实际上优化器还是会再根据自己的判断进行选择。
 - `FORCE INDEX`用于强制使用某个索引来完成查询。
-
 
 ### Multi-Range Read优化
 
@@ -493,7 +490,6 @@ ICP虽然挺好用的，但是并不是所有的SQL都能够通过ICP得到性�
 - ICP的加速效果取决于在存储引擎内通过ICP筛选掉的数据的比例。
 - 5.6 版本的不支持分表的ICP 功能，5.7 版本的开始支持。
 - 当SQL使用覆盖索引时，不支持ICP优化方法。
-
 
 ## 哈希索引
 
@@ -599,9 +595,9 @@ FTS Index Cache 在功能上和Insert Buffer类似，FTS Index Cache 和 Insert 
 - **数据库宕机**：如果当数据库发生宕机时，一些`FTS Index Cache`中的数据库可能未被同步到磁盘上。那么下次重启数据库时，当用户对表进行全文检索（查询或者插入操作）时，InnoDB存储引擎会自动读取未完成的文档，然后进行分词操作，再将分词的结果放入到`FTS Index Cache`中。
 - **数据删除**：对于删除操作，其在事务提交时，不删除磁盘Auxiliary Table中的记录，而只是删除FTS Cache Index中的记录。对于Auxiliary Table中被删除的记录，InnoDB存储引擎会记录其FTS Document ID，并将其保存在DELETED auxiliary table中。
 
-    - 在设置参数`innodb_ft_aux_table`后，用户同样可以访问`information_schema`架构下的表`INNODB_FT_DELETED`来观察删除的FTS Document ID。
-    - 由于文档的DML操作实际并不删除索引中的数据，相反还会在对应的`INNODB_FT_DELETED`表中插入记录，因此随着应用程序的允许，索引会变得非常大，即使索引中的有些数据已经被删除，查询也不会选择这类记录。为此，InnoDB存储引擎提供了`OPTIMIZE TABLE`命令来允许用户手工地将已经删除的记录从索引中彻底删除。因为`OPTIMIZE TABLE`还会进行一些其他的操作，如Cardinality的重新统计，若用户希望仅对倒排索引进行操作，那么可以通过参数`innodb_optimize_fulltext_only`进行设置。
-    - 若被删除的文档非常多，那么`OPTIMIZE TABLE`操作可能需要占用非常多的时间，这会影响应用程序的并发性，并极大地降低用户的响应时间。用户可以通过参数`innodb_ft_num_word_optimize`来限制每次实际删除的分词数量。该参数的默认值为`2000`。
+  - 在设置参数`innodb_ft_aux_table`后，用户同样可以访问`information_schema`架构下的表`INNODB_FT_DELETED`来观察删除的FTS Document ID。
+  - 由于文档的DML操作实际并不删除索引中的数据，相反还会在对应的`INNODB_FT_DELETED`表中插入记录，因此随着应用程序的允许，索引会变得非常大，即使索引中的有些数据已经被删除，查询也不会选择这类记录。为此，InnoDB存储引擎提供了`OPTIMIZE TABLE`命令来允许用户手工地将已经删除的记录从索引中彻底删除。因为`OPTIMIZE TABLE`还会进行一些其他的操作，如Cardinality的重新统计，若用户希望仅对倒排索引进行操作，那么可以通过参数`innodb_optimize_fulltext_only`进行设置。
+  - 若被删除的文档非常多，那么`OPTIMIZE TABLE`操作可能需要占用非常多的时间，这会影响应用程序的并发性，并极大地降低用户的响应时间。用户可以通过参数`innodb_ft_num_word_optimize`来限制每次实际删除的分词数量。该参数的默认值为`2000`。
 
 #### 全文检索创建
 
@@ -706,11 +702,10 @@ CREATE TABLE articles2 (
 
 但是这样就会存在一些问题，如果我要对title中的mysql进行全文检索的话，在倒排索引表`information_schema.INNODB_FT_INDEX_TABLE`中我能够得到`title`和`body`列中包含mysql的文档ID（主键），但是并不知道哪些文档是title列中包含mysql的。因此就会在文档ID回表查询返回行数据后，还需要Server层对查询到的列再进行一次过滤。
 
-
 > **以下内容均为我的猜想：**
 >
 > 西卡西，这样效率会不会太低了？
-> 
+>
 > 我的猜想是，MySQL底层会在分别为`title`和`body`建立一个倒排索引表，各自表存放各自的分词，而不是都放在`information_schema.INNODB_FT_INDEX_TABLE`表中的。如果对`title`进行全文检索的话，就查询`title`的倒排索引表，返回满足条件的文档ID，在根据文档ID回表即可。而为什么`information_schema.INNODB_FT_INDEX_TABLE`表会将两个倒排索引放在一起，我的猜测其实这个表就类似一个视图的概念，只是一个逻辑表，它将所有的倒排索引分词和文档信息展示在一起。
 
 #### 限制
@@ -721,7 +716,7 @@ CREATE TABLE articles2 (
 - 由多列组合而成的全文检索的索引列必须使用相同的字符集与排序规则。
 - 不支持没有**单词界定符（delimiter）**的语言，如中文、日语、韩语等。
 
-### 全文检索
+### 全文检索查询
 
 MySQL数据库支持全文检索（Full-Text Search）的查询，其语法为：
 
@@ -741,6 +736,7 @@ MySQL数据库通过`MATCH()…AGAINST()`语法支持全文检索的查询，`MA
 全文检索函数`MATH()`返回全文检索的**相关性值**。相关性值是非负浮点数。零相关性意味着没有相似性。相关性是根据**行（文档）中的单词数**、**行中唯一单词的数量**、**集合中的单词总数**以及**包含特定单词的行数**来计算的。
 
 全文搜索分为三种类型：
+
 - Natural Language
 - Boolean
 - Query Expansion
@@ -757,9 +753,9 @@ SELECT * FROM articles WHERE title LIKE '%database%' OR body LIKE'%database%';
 
 使用`EXPLAIN`执行查看SQL语句的执行计划:
 
-```
-# id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	articles		ALL					6	16.67	Using where
+```text
+# id select_type table partitions type possible_keys key key_len ref rows filtered Extra
+1 SIMPLE articles  ALL     6 16.67 Using where
 ```
 
 可以看出查询类型为ALL，说明B+树会通过全表查找的方式判断记录中的`title`或`body`字段是否包含`database`。
@@ -775,8 +771,8 @@ SELECT * FROM articles WHERE MATCH(title, body) AGAINST('database');
 观察上述SQL语句的执行计划：
 
 ```sql
-# id	select_type	table	partitions	type	possible_keys	key	key_len	ref	rows	filtered	Extra
-1	SIMPLE	articles		fulltext	idx_fts	idx_fts	0	const	1	100.00	Using where; Ft_hints: sorted
+# id select_type table partitions type possible_keys key key_len ref rows filtered Extra
+1 SIMPLE articles  fulltext idx_fts idx_fts 0 const 1 100.00 Using where; Ft_hints: sorted
 ```
 
 可以看到，在`type`这列显示了`fulltext`，即表示使用全文检索的倒排索引，而`key`这列显示了`idx_fts`，表示索引的名字，说明使用全文检索。除此之外再Extra列中包含`Ft_hints: sorted`标志，表示返回的行就会自动按照相关性最高的顺序排列。如果查询SQL中显式指定`ORDER BY`，则需要根据排序字段对列进行排序，Extra列中的标志会变为`Ft_hints: no_ranking; Using filesort`，表示不根据相关性排序而根据显式指定字段排序。例如：

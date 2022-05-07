@@ -50,7 +50,7 @@ InnoDB存储引擎支持意向锁设计比较简练，其意向锁即为**表级
 
 ![InnoDB存储引擎中锁的兼容性](imgs/InnoDB%E5%AD%98%E5%82%A8%E5%BC%95%E6%93%8E%E4%B8%AD%E9%94%81%E7%9A%84%E5%85%BC%E5%AE%B9%E6%80%A7.png)
 
-**演示**
+##### 意向锁演示
 
 简单创建一个表`test`,插入一些简单的数据。
 
@@ -95,7 +95,7 @@ UPDATE `test` SET `num` = '4' WHERE (`id` = '4');
 
 `SHOW ENGINE INNODB STATUS`命令来查看当前锁请求的信息：
 
-```
+```text
 ...
 ------------
 TRANSACTIONS
@@ -158,6 +158,7 @@ InnoDB中，每一行记录都有两个隐藏列：`DATA_TRX_ID`和`DATA_ROLL_PT
 当存在多个事务进行并发操作数据时，不同事务对同一行的更新操作产生多个版本，通过回滚指针`DATA_ROLL_PTR`将这些版本链接成一条**Undo Log链**。
 
 > Undo Log分为`INSERT`和`UPDATE`两种。`DELETE`可以看做是一种特殊的`UPDATE`，即在记录上修改删除标记。
+>
 > - `INSERT`：当进行插入数据操作时，会生成`Insert Undo Log`，只在事务回滚时需要, 并且在事务提交后就可以立即丢弃。
 > - `UPDATE/DELETE`：事务对记录进行`Delete`和`Update`操作时产生`Undo Log`，并将当前数据记录中的`DB_ROLL_PTR`字段指向它，它不仅在事务回滚时需要，一致性读也需要，所以不能随便删除，只有当数据库所使用的快照中不涉及该日志记录，对应的回滚日志才会被*Purge线程*删除。
 
@@ -193,18 +194,17 @@ ReadView的数据结构如下图所示：
 ReadView的组成：
 
 - `up_limit_id`：最先开始的事务，该SQL启动时，当前事务链表中最小的事务ID编号，也就是当前系统中创建最早但还未提交的事务——**低水位线**。
-    - 如果读取出来的数据行上的的`DB_TRX_ID`小于`up_limit_id`，则说明这条记录的最后修改在ReadView创建之前，因此这条记录可以被看见。
+  - 如果读取出来的数据行上的的`DB_TRX_ID`小于`up_limit_id`，则说明这条记录的最后修改在ReadView创建之前，因此这条记录可以被看见。
 - `low_limit_id`：最后开始的事务，该SQL启动时，当前事务链表中最大的事务ID编号，也就是最近创建的除自身以外最大事务编号——**高水位线**；
-    - 如果读取出来的数据行上的的`DB_TRX_ID`大于`low_limit_id`，则说明这条记录的最后修改在ReadView创建之后，因此这条记录肯定不可以被看见。
+  - 如果读取出来的数据行上的的`DB_TRX_ID`大于`low_limit_id`，则说明这条记录的最后修改在ReadView创建之后，因此这条记录肯定不可以被看见。
 - `m_ids`：当前活跃事务ID列表，所有事务链表中事务的ID集合
-    - 如果读取出来的数据行上的的`DB_TRX_ID`在`up_limit_id`和`low_limit_id`之间，则查找该数据上的`DB_TRX_ID`是否在ReadView的`m_ids`列表中：
-        - 如果存在，则表示这条记录的最后修改是在ReadView创建之时，被另外一个活跃事务所修改，所以这条记录也不可以被看见。
-        - 如果不存在，则表示这条记录的最后修改在ReadView创建之前，所以可以看到。
+  - 如果读取出来的数据行上的的`DB_TRX_ID`在`up_limit_id`和`low_limit_id`之间，则查找该数据上的`DB_TRX_ID`是否在ReadView的`m_ids`列表中：
+    - 如果存在，则表示这条记录的最后修改是在ReadView创建之时，被另外一个活跃事务所修改，所以这条记录也不可以被看见。
+    - 如果不存在，则表示这条记录的最后修改在ReadView创建之前，所以可以看到。
 
 > 注：事务ID越小，事务开始的越早；事务ID越大，事务开始的越晚。
 
-
-**REPEATABLE READ下的ReadView**
+##### REPEATABLE READ下的ReadView
 
 每个事务首次执行`SELECT`语句时，会将当前系统所有活跃事务拷贝到一个列表中生成ReadView。每个事务后续的`SELECT`操作复用其之前生成的ReadView。`UPDATE`,`DELETE`,`INSERT`对一致性读快照无影响。
 
@@ -215,8 +215,7 @@ ReadView的组成：
 
 针对RR隔离级别，在第一次创建ReadView后，这个ReadView就会一直持续到事务结束，也就是说在事务执行过程中，数据的可见性不会变，所以在事务内部不会出现不一致的情况。
 
-
-**READ COMMITED下的ReadView**
+##### READ COMMITED下的ReadView
 
 每次SELECT执行，都会重新将当前系统中的所有活跃事务拷贝到一个列表中生成ReadView。
 
@@ -293,9 +292,9 @@ SELECT AUTO_INCREMENT FROM information_schema.TABLES where TABLE_SCHEMA = 'datab
 总结：
 
 - 有主从同步
-    - Binlog: Statement
+  - Binlog: Statement
         **连续模式**
-    - Binlog：Row
+  - Binlog：Row
         **交叉模式**
 - 无主从同步
     **交叉模式**
@@ -312,7 +311,6 @@ SELECT AUTO_INCREMENT FROM information_schema.TABLES where TABLE_SCHEMA = 'datab
 
 在上述的例子中，两个会话中的事务都没有进行`COMMIT`或`ROLLBACK`操作，而会话B的操作会被阻塞。这是因为`id`为`3`的父表在会话A中已经加了一个X锁，而此时在会话B中用户又需要对父表中id为3的行加一个S锁，这时INSERT的操作会被阻塞。设想如果访问父表时，使用的是一致性的非锁定读，这时Session B会读到父表有`id=3`的记录，可以进行插入操作。但是如果会话A对事务提交了，则父表中就不存在`id`为`3`的记录。数据在父、子表就会存在不一致的情况。
 
-
 ## 锁的算法
 
 参考：
@@ -323,19 +321,18 @@ SELECT AUTO_INCREMENT FROM information_schema.TABLES where TABLE_SCHEMA = 'datab
 InnoDB存储引擎有3种行锁的算法，其分别是：
 
 - `Record Lock`：**记录锁**是单个行记录上的锁
-    - `LOCK_MODE`: `S,REC_NOT_GAP` / `X,REC_NOT_GAP`
+  - `LOCK_MODE`: `S,REC_NOT_GAP` / `X,REC_NOT_GAP`
 - `Gap Lock`：**间隙锁**，锁定一个范围，但不包含记录本身。RR特有
-    - `REPEATABLE-READ`隔离级别特有
-    - `LOCK_MODE`: `S,GAP` / `X,GAP`
+  - `REPEATABLE-READ`隔离级别特有
+  - `LOCK_MODE`: `S,GAP` / `X,GAP`
 - `Next-Key Lock`：**临键锁**是索引记录上的记录锁和索引记录之前的间隙上的间隙锁的组合（Gap Lock + Record Lock）。
-    - 应为间隙锁是`REPEATABLE-READ`隔离级别特有，所以临键锁也是
-    - InnoDB存储引擎在索引上的当前读（`SELECT ... FOR UPDATE` / `SELECT ... LOCK IN SHARE MODE`）都是使用临键锁来进行锁定的，其设计目的是为了解决当前读的幻读问题。
-    - 唯一索引的临键锁会被优化为记录锁
-    - 如果索引值命中多个，则都加上临键锁。例如`i`值为`8`, `10`, `10`, `11`, `18`，当使用`where i=10 for update`条件时，两个`i=10`的临键锁区间为`(8,10]`和`(10,10]`。
-    - `LOCK_MODE`: `S` / `X`
+  - 应为间隙锁是`REPEATABLE-READ`隔离级别特有，所以临键锁也是
+  - InnoDB存储引擎在索引上的当前读（`SELECT ... FOR UPDATE` / `SELECT ... LOCK IN SHARE MODE`）都是使用临键锁来进行锁定的，其设计目的是为了解决当前读的幻读问题。
+  - 唯一索引的临键锁会被优化为记录锁
+  - 如果索引值命中多个，则都加上临键锁。例如`i`值为`8`, `10`, `10`, `11`, `18`，当使用`where i=10 for update`条件时，两个`i=10`的临键锁区间为`(8,10]`和`(10,10]`。
+  - `LOCK_MODE`: `S` / `X`
 
-
-### 演示
+### 锁的算法演示
 
 新建表`z`，表`z`中存在一个主键索引和一个二级索引`idx_b`和然后随便创建数据放入表中。
 
@@ -367,14 +364,14 @@ SELECT OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, LOCK_TYPE, LOCK_MODE, LOCK_DATA F
 
 查询结果如下表所示，第一行的表意向锁IX暂不考虑，接下来的两行数据分别表示临键锁对应的区间分别为 (102 ,103] 和 (103, 103]，需要注意的是因为在`idx_b`索引上有两个103，所以创建两个**临键锁**。InnoDB存储引擎还会对辅助索引的下一个键值区间(103, 104)加上一个**区间锁**，用于防止该区间内的幻读问题。除此之外在主键索引上还需要将103对应的主键索引上的记录id分别对应3和4的记录加两个**记录锁**，防止其他事务对其进行修改操作。
 
-```
-# OBJECT_SCHEMA	OBJECT_NAME	INDEX_NAME	LOCK_TYPE	LOCK_MODE	LOCK_DATA
-employees	z		TABLE	IX	
-employees	z	idx_b	RECORD	X	103, 3
-employees	z	idx_b	RECORD	X	103, 4
-employees	z	PRIMARY	RECORD	X,REC_NOT_GAP	3
-employees	z	PRIMARY	RECORD	X,REC_NOT_GAP	4
-employees	z	idx_b	RECORD	X,GAP	104, 5
+```text
+# OBJECT_SCHEMA OBJECT_NAME INDEX_NAME LOCK_TYPE LOCK_MODE LOCK_DATA
+employees z  TABLE IX 
+employees z idx_b RECORD X 103, 3
+employees z idx_b RECORD X 103, 4
+employees z PRIMARY RECORD X,REC_NOT_GAP 3
+employees z PRIMARY RECORD X,REC_NOT_GAP 4
+employees z idx_b RECORD X,GAP 104, 5
 ```
 
 ### 唯一索引锁降级
@@ -453,12 +450,11 @@ SELECT OBJECT_SCHEMA, OBJECT_NAME, INDEX_NAME, LOCK_TYPE, LOCK_MODE, LOCK_DATA F
 
 可以发现`LOCK_TYPE`为`RECORD`的锁都是`X,REC_NOT_GAP`，即记录锁。并没有出现间隙锁或者临键锁。
 
+```text
+# OBJECT_SCHEMA OBJECT_NAME INDEX_NAME LOCK_TYPE LOCK_MODE LOCK_DATA
+employees z  TABLE IX 
+employees z idx_b RECORD X,REC_NOT_GAP 103, 3
+employees z idx_b RECORD X,REC_NOT_GAP 103, 4
+employees z PRIMARY RECORD X,REC_NOT_GAP 3
+employees z PRIMARY RECORD X,REC_NOT_GAP 4
 ```
-# OBJECT_SCHEMA	OBJECT_NAME	INDEX_NAME	LOCK_TYPE	LOCK_MODE	LOCK_DATA
-employees	z		TABLE	IX	
-employees	z	idx_b	RECORD	X,REC_NOT_GAP	103, 3
-employees	z	idx_b	RECORD	X,REC_NOT_GAP	103, 4
-employees	z	PRIMARY	RECORD	X,REC_NOT_GAP	3
-employees	z	PRIMARY	RECORD	X,REC_NOT_GAP	4
-```
-
