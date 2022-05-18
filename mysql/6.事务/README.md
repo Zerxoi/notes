@@ -274,3 +274,108 @@ purge用于最终完成delete和update操作。这样设计是因为InnoDB存储
 ![undo log与history列表的关系](imgs/undo%20log%E4%B8%8Ehistory%E5%88%97%E8%A1%A8%E7%9A%84%E5%85%B3%E7%B3%BB.png)
 
 InnoDB存储引擎这种先从history list中找undo log，然后再从undo page中找undo log的设计模式是为了避免大量的随机读取操作，从而提高purge的效率。
+
+### group commit
+
+若事务为非只读事务，则每次事务提交时需要进行一次 `fsync` 操作，以此保证重做日志都已经写入磁盘。当数据库发生宕机时，可以通过重做日志进行恢复。虽然固态硬盘的出现提高了磁盘的性能，然而磁盘的 `fsync` 性能是有限的。为了提高磁盘 `fsync` 的效率，当前数据库都提供了 group commit 的功能，即**一次fsync可以刷新确保多个事务日志被写入文件**。对于 InnoDB 存储引擎来说，事务提交时会进行两个阶段的操作：
+
+1. 修改内存中事务对应的信息，并且将日志写入重做日志缓冲。
+2. 调用fsync将确保日志都从重做日志缓冲写入磁盘。
+
+步骤2相对步骤1是一个较慢的过程，这是因为存储引擎需要与磁盘打交道。但当有事务进行这个过程时，其他事务可以进行步骤1的操作，正在提交的事物完成提交操作后，再次进行步骤2时，可以将多个事务的重做日志通过一次 `fsync` 刷新到磁盘，这样就大大地减少了磁盘的压力，从而提高了数据库的整体性能。对于写入或更新较为频繁的操作，group commit的效果尤为明显。
+
+## 事务控制语句
+
+- `START TRANSACTION` | `BEGIN`：显式地开启一个事务。
+  - 在存储过程中，MySQL 数据库的分析器会自动将 `BEGIN` 识别为存储过程开始和结束标识符 `BEGIN…END`，因此在存储过程中只能使用 `START TRANSACTION` 语句来开启一个事务。
+- `COMMIT` | `COMMIT WORK`：显式地提交一个事务。
+  - `COMMIT` 和 `COMMIT WORK` 的不同之处在于 `COMMIT WORK` 可以通过 `completion_type` 参数来控制事务结束后的行为：
+    - `completion_type = 0`：`COMMIT WORK` 提交后不进行任何操作，等价于 `COMMIT`。
+    - `completion_type = 1`：`COMMIT WORK` 提交后会自动开启一个相同隔离级别的事务，等价于 `COMMIT AND CHAIN`。
+    - `completion_type = 1`：`COMMIT WORK` 提交后会自动断开与服务器的连接，等价于 `COMMIT AND RELEASE`。
+  - 要想使用这个语句的最简形式，只需发出 `COMMIT`。也可以更详细一些，写为`COMMIT WORK`，不过这二者几乎是等价的。COMMIT会提交事务，并使得已对数据库做的所有修改成为永久性的。
+- `ROLLBACK` | `ROLLBACK WORK`：显示地回滚一个事务。回滚会结束用户的事务，并撤销正在进行的所有未提交的修改。
+  - `ROLLBACK` 和 `ROLLBACK WORK` 与 `COMMIT` 和 `COMMIT WORK` 的工作一样，这里不再进行赘述。
+  - `ROLLBACK TO SAVEPOINT` 中虽然有 `ROLLBACK`，但其并不是真正地结束一个事务，因此即使执行了 `ROLLBACK TO SAVEPOINT`，之后也需要显式地运行 `COMMIT` 或 `ROLLBACK` 命令。
+- `SAVEPOINT identifier`：`SAVEPOINT` 允许在事务中创建一个保存点，一个事务中可以有多个 `SAVEPOINT`。
+- `RELEASE SAVEPOINT identifier`：删除一个事务的保存点，当没有一个保存点执行这句语句时，会抛出一个异常。
+- `ROLLBACK TO [SAVEPOINT] identifier`：这个语句与 `SAVEPOINT` 命令一起使用。可以把事务回滚到标记点，而不回滚在此标记点之前的任何工作。如果回滚到一个不存在的保存点，会抛出异常。
+- `SET TRANSACTION`：这个语句用来设置事务的隔离级别。InnoDB存储引擎提供的事务隔离级别有：`READ UNCOMMITTED`、`READ COMMITTED`、`REPEATABLE READ`、`SERIALIZABLE`。
+
+需要注意的是，事务中的一条语句失败并抛出异常时，并不会导致先前已经执行的语句自动回滚。所有的执行都会得到保留，必须由用户自己来决定是否对其进行提交或回滚的操作。
+
+## 隐式提交的SQL语句
+
+以下这些SQL语句会产生一个隐式的提交操作，即执行完这些语句后，会有一个隐式的COMMIT操作。
+
+- DDL 语句：`ALTER DATABASE...UPGRADE DATA DIRECTORY NAME`，`ALTER EVENT`，`ALTER PROCEDURE`，`ALTER TABLE`，`ALTER VIEW`，`CREATE DATABASE`，`CREATE EVENT`，`CREATE INDEX`，`CREATE PROCEDURE`，`CREATE TABLE`，`CREATE TRIGGER`，`CREATE VIEW`，`DROP DATABASE`，`DROP EVENT`，`DROP INDEX`，`DROP PROCEDURE`，`DROP TABLE`，`DROP TRIGGER`，`DROP VIEW`，`RENAME TABLE`，`TRUNCATE TABLE`。
+- 用来隐式地修改 MySQL 架构的操作：`CREATE USER`、`DROP USER`、`GRANT`、`RENAME USER`、`REVOKE`、`SET PASSWORD`。
+- 管理语句：`ANALYZE TABLE`、`CACHE INDEX`、`CHECK TABLE`、`LOAD INDEX INTO CACHE`、`OPTIMIZE TABLE`、`REPAIR TABLE`。
+
+另外需要注意的是，`TRUNCATE TABLE` 语句是 DDL，因此虽然和对整张表执行 `DELETE` 的结果是一样的，但它是不能被回滚的。
+
+## 对事务操作的统计
+
+由于 InnoDB 存储引擎是支持事务的，因此 InnoDB 存储引擎的应用需要在考虑每秒查询数（Queries Per Second，QPS）的同时，应该关注每秒事务处理的能力（Transaction Per Second，TPS）。
+
+计算 TPS 的方法是 `(com_commit + com_rollback) / time`。但是利用这种方法进行计算的前提是：所有的事务必须都是显式提交的，如果存在隐式地提交和回滚（默认 `autocommit = 1` ），不会计算到 `com_commit` 和 `com_rollback` 变量中。
+
+MySQL 通过 `SHOW GLOBAL STATUS LIKE 'com_commit'` 和 `SHOW GLOBAL STATUS LIKE 'com_commit'` 查看 com_commit 和 com_rollback 变量。
+
+## 事务的隔离级别
+
+SQL标准定义的四个隔离级别为：
+
+- `READ UNCOMMITTED`
+- `READ COMMITTED`
+  - 在 `READ COMMITTED` 的事务隔离级别下，除了唯一性的约束检查及外键约束的检查需要 gap lock，InnoDB 存储引擎不会使用 gap lock 的锁算法。
+  - 在MySQL 5.0版本以前，在不支持ROW格式的二进制日志时，可以将参数 `innodb_locks_unsafe_for_binlog` 设置为 `1` 可以在二进制日志为 `STATEMENT` 下使用 `READ COMMITTED` 的事务隔离级别会导致 `binlog` 与数据库数据不一致，进而引起主从不一致。
+  - 在MySQL 5.1版本之后支持了 `ROW` 格式的二进制日志记录格式，避免了`READ COMMITTED`的事务隔离级别产生的数据不一致问题。
+- `REPEATABLE READ`
+  - 因为 InnoDB 存储引擎在 `REPEATABLE READ` 隔离级别下就可以达到 3° 的隔离，因此一般不在本地事务中使用 `SERIALIABLE` 的隔离级别。
+- `SERIALIZABLE`
+  - 在 `SERIALIABLE` 的事务隔离级别，InnoDB 存储引擎会对每个 `SELECT` 语句后自动加上 `LOCK IN SHARE MODE`，即为每个读取操作加一个共享锁。因此在这个事务隔离级别下，读占用了锁，对一致性的非锁定读不再予以支持。
+  - `SERIALIABLE` 的事务隔离级别主要用于InnoDB存储引擎的分布式事务。
+
+## 分布式事务
+
+### MySQL 的分布式事务
+
+InnoDB 存储引擎提供了对 XA 事务的支持，并通过 XA 事务来支持分布式事务的实现。
+
+**分布式事务**指的是允许多个独立的事务资源（transactional resources）参与到一个全局的事务中。事务资源通常是关系型数据库系统，但也可以是其他类型的资源。全局事务要求在其中的所有参与的事务要么都提交，要么都回滚，这对于事务原有的 ACID 要求又有了提高。
+
+另外，在使用分布式事务时，InnoDB存储引擎的事务隔离级别必须设置为 `SERIALIZABLE`。
+
+XA事务由一个或多个**资源管理器（Resource Managers）**、一个**事务管理器（Transaction Manager）**以及一个**应用程序（Application Program）**组成。
+
+- 资源管理器：提供访问事务资源的方法。通常一个数据库就是一个资源管理器。
+- 事务管理器：协调参与全局事务中的各个事务。需要和参与全局事务的所有资源管理器进行通信。
+- 应用程序：定义事务的边界，指定全局事务中的操作。
+
+在MySQL数据库的分布式事务中，资源管理器就是MySQL数据库，事务管理器为连接MySQL服务器的客户端。下图显示了一个分布式事务的模型。
+
+![分布式事务模型](imgs/%E5%88%86%E5%B8%83%E5%BC%8F%E4%BA%8B%E5%8A%A1%E6%A8%A1%E5%9E%8B.png)
+
+分布式事务使用**两段式提交（two-phase commit）**的方式。
+
+- 第一阶段，所有参与全局事务的节点都开始准备（`PREPARE`），告诉事务管理器它们准备好提交了。
+- 第二阶段，事务管理器告诉资源管理器执行 `ROLLBACK` 还是 `COMMIT`。如果任何一个节点显示不能提交，则所有的节点都被告知需要回滚。可见与本地事务不同的是，分布式事务需要多一次的 `PREPARE` 操作，待收到所有节点的同意信息后，再进行 `COMMIT` 或是 `ROLLBACK` 操作。
+
+### 内部 XA 事务
+
+在 MySQL 数据库中的存储引擎与插件之间，又或者在存储引擎与存储引擎之间的分布式事务被称为**内部 XA 事务**。
+
+最为常见的内部 XA 事务存在于 binlog 与 InnoDB 存储引擎之间。由于复制的需要，因此目前绝大多数的数据库都开启了 binlog 功能。在事务提交时，先写二进制日志，再写 InnoDB 存储引擎的重做日志。对上述两个操作的要求也是原子的，即二进制日志和重做日志必须同时写入。若二进制日志先写了，而在写入 InnoDB 存储引擎时发生了宕机，那么 slave 可能会接收到 master 传过去的二进制日志并执行，最终导致了主从不一致的情况。如下图所示。
+
+![宕机导致replication主从不一致的情况](imgs/%E5%AE%95%E6%9C%BA%E5%AF%BC%E8%87%B4replication%E4%B8%BB%E4%BB%8E%E4%B8%8D%E4%B8%80%E8%87%B4%E7%9A%84%E6%83%85%E5%86%B5.png)
+
+如果执行完①、②后在步骤③之前MySQL数据库发生了宕机，则会发生主从不一致的情况。为了解决这个问题，MySQL 数据库在 binlog 与 InnoDB 存储引擎之间采用 XA 事务。当事务提交时，InnoDB 存储引擎会先做一个 PREPARE 操作，将事务的 xid 写入，接着进行二进制日志的写入，如下图所示。如果在InnoDB 存储引擎提交前，MySQL 数据库宕机了，那么 MySQL 数据库在重启后会先检查准备的 UXID 事务是否已经提交，若没有，则在存储引擎层再进行一次提交操作。
+
+![MySQL数据库通过内部XA事务保证主从数据一致](imgs/MySQL%E6%95%B0%E6%8D%AE%E5%BA%93%E9%80%9A%E8%BF%87%E5%86%85%E9%83%A8XA%E4%BA%8B%E5%8A%A1%E4%BF%9D%E8%AF%81%E4%B8%BB%E4%BB%8E%E6%95%B0%E6%8D%AE%E4%B8%80%E8%87%B4.png)
+
+## 长事务
+
+长事务(Long-Lived Transactions)，顾名思义，就是执行时间较长的事务。
+
+长事务产生了一个问题，在执行过程中，当数据库或操作系统、硬件等发生问题时，重新开始事务的代价变得不可接受。数据库需要回滚所有已经发生的变化，而这个过程可能比产生这些变化的时间还要长。因此，对于长事务的问题，有时可以通过**转化为小批量(mini batch)的事务**来进行处理。当事务发生错误时，只需要回滚一部分数据，然后接着上次已完成的事务继续进行。
