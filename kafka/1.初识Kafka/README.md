@@ -209,6 +209,7 @@ services:
       - KAFKA_CFG_LISTENERS=INNER://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092
       - KAFKA_CFG_ADVERTISED_LISTENERS=INNER://kafka1:9092,EXTERNAL://localhost:29092
       - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=INNER
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
     depends_on:
       - zoo1
       - zoo2
@@ -228,6 +229,7 @@ services:
       - KAFKA_CFG_LISTENERS=INNER://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092
       - KAFKA_CFG_ADVERTISED_LISTENERS=INNER://kafka2:9092,EXTERNAL://localhost:29093
       - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=INNER
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
     depends_on:
       - zoo1
       - zoo2
@@ -247,6 +249,7 @@ services:
       - KAFKA_CFG_LISTENERS=INNER://0.0.0.0:9092,EXTERNAL://0.0.0.0:29092
       - KAFKA_CFG_ADVERTISED_LISTENERS=INNER://kafka3:9092,EXTERNAL://localhost:29094
       - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=INNER
+      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
     depends_on:
       - zoo1
       - zoo2
@@ -264,3 +267,42 @@ services:
 - Docker 网络外部的客户端使用监听器 `EXTERNAL` 连接，`EXTERNAL` 侦听器会监听容器所有网卡接口的 `29092` 端口。当宿主机的客户端访问侦听器时会返回建立连接的元数据 `localhost:29093` ，客户端根据元数据与暴露在宿主机 `29093` 端口的外部网络侦听器建立连接。
 
 有关 Kafka 侦听器的更多信息参考 [Kafka Listeners - Explained](https://rmoff.net/2018/08/02/kafka-listeners-explained/)。
+
+`KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE` 用于设置服务端参数 `auto.create.topics.enable`，该参数用于控制当生产者向一个尚未创建的主题发送消息时，是否会自动创建一个该主题。
+
+### 生产与消费
+
+Kafka提供了许多使用的脚本工具，存放在 `$KAFKA_HOME` 的 `bin` 目录下（对应容器中的 `/opt/bitnami/kafka/bin` 目录）。
+
+其中与主题有关的就是 `kafka-topics.sh` 脚本，下面将演示如果通过该脚本 `--create` 选项创建一个分区数为 `4`、副本因子为 `2` 的主题 `topic-create`。
+
+```sh
+kafka-topics.sh --bootstrap-server kafka1:9092  --create --topic topic-create --partitions 4 --replication-factor 2
+```
+
+还可以通过 `--describe` 选项查看主题 `topic-create` 的详细信息。
+
+```sh
+kafka-topics.sh --bootstrap-server kafka1:9092 --describe --topic topic-create
+```
+
+通过 `kafka-console-consumer.sh` 脚本来消费消息。
+
+```sh
+kafka-console-consumer.sh --bootstrap-server kafka1:9092 --topic topic-create
+```
+
+通过 `kafka-console-producer.sh` 脚本来发送消息。
+
+```sh
+$ kafka-console-producer.sh --bootstrap-server kafka1:9092 --topic topic-create
+> Hello, Kafka!
+```
+
+在发送 `Hello, Kafka!` 字符串后，消费者会接收到该字符串。
+
+在使用完主题 `topic-create` 后通过 `kafka-topics.sh` 脚本的 `--delete` 选项完成主题的删除操作。
+
+```sh
+kafka-topics.sh --bootstrap-server kafka1:9092  --delete --topic topic-create
+```
