@@ -628,3 +628,108 @@ let switchTab = (tab: Tab) => {
   {{ text }} {{ count }}
 </MyComponent>
 ```
+
+## 异步组件
+
+在大型项目中，我们可能需要拆分应用为更小的块，并仅在需要时再从服务器加载相关组件。为实现这点，Vue 提供了一个 `defineAsyncComponent` 方法：
+
+```typescript
+import { defineAsyncComponent } from 'vue'
+
+const AsyncComp = defineAsyncComponent(() => {
+  return new Promise((resolve, reject) => {
+    // ...从服务器获取组件
+    resolve(/* 获取到的组件 */)
+  })
+})
+// ... 像使用其他一般组件一样使用 `AsyncComp`
+```
+
+如你所见，`defineAsyncComponent` 方法接收一个返回 `Promise` 的加载函数。这个 `Promise` 的 `resolve` 回调方法应该在从服务器获得组件定义时调用。你也可以调用 `reject(reason)` 表明加载失败。
+
+ES 模块动态导入也会返回一个 Promise，所以多数情况下我们会将它和 defineAsyncComponent 搭配使用，类似 Vite 和 Webpack 这样的构建工具也支持这种语法，因此我们也可以用它来导入 Vue 单文件组件：
+
+```typescript
+import { defineAsyncComponent } from 'vue'
+
+const AsyncComp = defineAsyncComponent(() =>
+  import('./components/MyComponent.vue')
+)
+```
+
+最后得到的 AsyncComp 是一个包装器组件，仅在页面需要它渲染时才调用加载函数。另外，它还会将 props 传给内部的组件，所以你可以使用这个异步的包装器组件无缝地替换原始组件，同时实现延迟加载。
+
+### 搭配 Suspense 使用
+
+异步组件通常会搭配内置的 `<Suspense>` 组件一起使用。
+
+## `<Suspense>`
+
+`<Suspense>` 是一个内置组件，用来在组件树中编排异步依赖。它可以在等待组件树下的多个嵌套异步依赖项解析完成时，呈现加载状态。
+
+`<Suspense>` 用于解决如何与异步依赖进行交互的，我们需要想象这样一种组件层级结构：
+
+```text
+<Suspense>
+└─ <Dashboard>
+   ├─ <Profile>
+   │  └─ <FriendStatus>（组件有异步的 setup()）
+   └─ <Content>
+      ├─ <ActivityFeed> （异步组件）
+      └─ <Stats>（异步组件）
+```
+
+在这个组件树中有多个嵌套组件，要渲染出它们，首先得解析一些异步资源。如果没有 `<Suspense>`，则它们每个都需要处理自己的加载、报错和完成状态。在最坏的情况下，我们可能会在页面上看到三个旋转的加载态，在不同的时间显示出内容。
+
+有了 `<Suspense>` 组件后，我们就可以在等待整个多层级组件树中的各个异步依赖获取结果时，在顶层展示出加载中或加载失败的状态。
+
+`<Suspense>` 可以等待的异步依赖有两种：
+
+1. 带有异步 `setup()` 钩子的组件。这也包含了使用 `<script setup>` 时有顶层 `await` 表达式的组件。
+    - 组合式 API 中组件的 setup() 钩子可以是异步的：
+        ```typescript
+        export default {
+          async setup() {
+            const res = await fetch(...)
+            const posts = await res.json()
+            return {
+              posts
+            }
+          }
+        }
+        ```
+    - 如果使用 `<script setup>`，那么顶层 `await` 表达式会自动让该组件成为一个异步依赖：
+        ```vue
+        <script setup>
+        const res = await fetch(...)
+        const posts = await res.json()
+        </script>
+
+        <template>
+          {{ posts }}
+        </template>
+        ```
+
+2. 异步组件。
+    - 异步组件默认就是 “suspensible” 的。这意味着如果组件关系链上有一个 `<Suspense>`，那么这个异步组件就会被当作这个 `<Suspense>` 的一个异步依赖。在这种情况下，加载状态是由 `<Suspense>` 控制，而该组件自己的加载、报错、延时和超时等选项都将被忽略。
+    - 异步组件也可以通过在选项中指定 `suspensible: false` 表明不用 `Suspense` 控制，并让组件始终自己控制其加载状态。
+
+
+
+### 加载中状态
+
+`<Suspense>` 组件有两个插槽：`#default` 和 `#fallback`。两个插槽都只允许一个直接子节点。在可能的时候都将显示默认槽中的节点。否则将显示后备槽中的节点。
+
+```vue
+<Suspense>
+  <!-- 具有深层异步依赖的组件 -->
+  <Dashboard />
+
+  <!-- 在 #fallback 插槽中显示 “正在加载中” -->
+  <template #fallback>
+    Loading...
+  </template>
+</Suspense>
+```
+
+在初始渲染时，`<Suspense>` 将在内存中渲染其默认的插槽内容。如果在这个过程中遇到任何异步依赖，则会进入**挂起**状态。在挂起状态期间，展示的是后备内容。当所有遇到的异步依赖都完成后，`<Suspense>` 会进入**完成**状态，并将展示出默认插槽的内容。
