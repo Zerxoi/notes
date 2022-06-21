@@ -373,3 +373,256 @@ defineExpose({
 ```
 
 当父级通过模板 `refs` 获取此组件的实例时，检索到的实例将具有 `{ a: number, b: number }` 的类型（就像在普通实例上一样，`refs` 会自动展开）。
+
+## 动态组件
+
+有的时候，在不同组件之间进行动态切换是非常有用的，可以通过 Vue 的 `<component>` 元素加一个特殊的 `is` 属性来实现动态组件：
+
+```vue
+<script setup lang="ts">
+import A from "./A.vue"
+import B from './B.vue'
+import C from './C.vue'
+
+import { markRaw, reactive } from "vue";
+
+type Tab = {
+    name: string,
+    component: any
+}
+
+let tabs = reactive<Tab[]>([
+    {
+        name: "A",
+        component: markRaw(A)
+    },
+    {
+        name: "B",
+        component: markRaw(B)
+    },
+    {
+        name: "C",
+        component: markRaw(C)
+    }
+])
+
+let current = reactive({
+    component: tabs[0].component
+})
+
+let switchTab = (tab: Tab) => {
+    current.component = tab.component
+}
+</script>
+
+<template>
+    <div>
+        <button :key="tab.name" v-for="tab in tabs" @click="switchTab(tab)">{{ tab.name }}</button>
+        <component :is="current.component"></component>
+    </div>
+</template>
+```
+
+## 插槽
+
+在某些场景中，我们可能想要为子组件传递一些模板片段，让子组件在它们的组件中渲染这些片段。
+
+举个例子，这里有一个 `<FancyButton>` 组件，可以像这样使用：
+
+```vue
+<FancyButton>
+  Click me! <!-- 插槽内容 -->
+</FancyButton>
+```
+
+而 `<FancyButton>` 的模板是这样的：
+
+```vue
+<button class="fancy-btn">
+  <slot></slot> <!-- 插槽插口 -->
+</button>
+```
+
+`<slot>` 元素是一个**插槽的插口**，标示了父元素提供的**插槽内容**将在哪里被渲染。
+
+![插槽](imgs/%E6%8F%92%E6%A7%BD.png)
+
+最终渲染出的 DOM 是这样：
+
+```vue
+<button class="fancy-btn">
+  Click me!
+</button>
+```
+
+### 渲染作用域
+
+插槽内容可以访问到父组件的数据作用域，因为插槽内容本身是在父组件模板中定义的。举个例子：
+
+```vue
+<span>{{ message }}</span>
+<FancyButton>{{ message }}</FancyButton>
+```
+
+这里的两个 `{{ message }}` 插值表达式渲染的内容都是一样的。
+
+插槽内容无法访问子组件的数据，请牢记一条规则：
+
+> 任何父组件模板中的东西都只被编译到父组件的作用域中；而任何子组件模板中的东西都只被编译到子组件的作用域中。
+
+### 默认内容
+
+在外部没有提供任何内容的情况下，为插槽指定默认内容用于渲染是很有用的。比如在 `<SubmitButton>` 组件中，如果我们想在父组件没有提供任何插槽内容时，把“Submit”文本渲染到 `<button>` 内。需要将“Submit”写在 `<slot>` 标签之间，使其成为默认内容：
+
+```vue
+<button type="submit">
+  <slot>
+    Submit <!-- 默认内容 -->
+  </slot>
+</button>
+```
+
+当我们在父组件中使用 `<SubmitButton>` 但不提供任何插槽内容：
+
+```vue
+<SubmitButton />
+```
+那么将渲染默认的“Submit”单词：
+
+```vue
+<button type="submit">Submit</button>
+```
+
+### 具名插槽
+
+有时在一个组件中包含多个插槽的插口是很有用的。举个例子，在一个 <BaseLayout> 组件中，有如下这样的模板：
+
+```vue
+<div class="container">
+  <header>
+    <!-- 标题内容放这里 -->
+  </header>
+  <main>
+    <!-- 主要内容放这里 -->
+  </main>
+  <footer>
+    <!-- 底部内容放这里 -->
+  </footer>
+</div>
+```
+
+对于这种场景，`<slot>` 元素可以有一个特殊的 attribute `name`，用来给各个插槽分配唯一的 ID，以确定每一处要渲染的内容：
+
+```vue
+<div class="container">
+  <header>
+    <slot name="header"></slot>
+  </header>
+  <main>
+    <slot></slot>
+  </main>
+  <footer>
+    <slot name="footer"></slot>
+  </footer>
+</div>
+```
+
+没有提供 `name` 的 `<slot>` 插口会隐式地命名为“default”。
+
+在父组件中使用 `<BaseLayout>` 时，我们需要一种方式将多个插槽内容传入到各自目标插槽的插口。此时就需要用到**具名插槽**了，要为具名插槽传入内容，我们需要使用一个含 `v-slot` 指令的 `<template>` 元素，并将目标插槽的名字传给该指令：
+
+```vue
+<BaseLayout>
+  <template v-slot:header>
+    <!-- header 插槽的内容放这里 -->
+  </template>
+</BaseLayout>
+```
+
+`v-slot` 有对应的简写 `#`，因此 `<template v-slot:header>` 可以简写为 `<template #header>`。其意思就是“将这部分模板片段传入子组件的 header 插槽中”。
+
+![具名插槽](imgs/%E5%85%B7%E5%90%8D%E6%8F%92%E6%A7%BD.png)
+
+下面我们给出完整的、向 `<BaseLayout>` 传递插槽内容的代码，指令均使用的是缩写形式：
+
+```vue
+<BaseLayout>
+  <template #header>
+    <h1>Here might be a page title</h1>
+  </template>
+
+  <template #default>
+    <p>A paragraph for the main content.</p>
+    <p>And another one.</p>
+  </template>
+
+  <template #footer>
+    <p>Here's some contact info</p>
+  </template>
+</BaseLayout>
+```
+
+当一个组件同时接收默认插槽和具名插槽时，所有位于顶级的非 `<template>` 节点都被隐式地视为默认插槽的内容。所以上面也可以写成：
+
+```vue
+<BaseLayout>
+  <template #header>
+    <h1>Here might be a page title</h1>
+  </template>
+
+  <!-- 隐式的默认插槽 -->
+  <p>A paragraph for the main content.</p>
+  <p>And another one.</p>
+
+  <template #footer>
+    <p>Here's some contact info</p>
+  </template>
+</BaseLayout>
+```
+### 动态插槽
+
+动态指令参数在 `v-slot` 上也是有效的，即可以定义下面这样的动态插槽名：
+
+```vue
+<base-layout>
+  <template v-slot:[dynamicSlotName]>
+    ...
+  </template>
+
+  <!-- 缩写为 -->
+  <template #[dynamicSlotName]>
+    ...
+  </template>
+</base-layout>
+```
+
+### 作用域插槽
+
+在上面的渲染作用域中我们讨论到，插槽的内容无法访问到子组件的状态。
+
+然而在某些场景下插槽的内容可能想要同时使用父组件域内和子组件域内的数据。要做到这一点，我们需要一种方法来让子组件在渲染时将一部分数据提供给插槽。
+
+我们也确实有办法这么做！可以像对组件传递 prop 那样，向一个插槽的插口上传递 attribute：
+
+```vue
+<!-- <MyComponent> 的模板 -->
+<div>
+  <slot :text="greetingMessage" :count="1"></slot>
+</div>
+```
+
+当需要接收插槽 prop 时，默认插槽和具名插槽的使用方式有一些小区别。下面我们将先展示默认插槽如何接受 prop，通过子组件标签上的 `v-slot` 指令，直接接收到了一个插槽 prop 对象：
+
+```vue
+<MyComponent v-slot="slotProps">
+  {{ slotProps.text }} {{ slotProps.count }}
+</MyComponent>
+```
+
+![作用于插槽](imgs/%E4%BD%9C%E7%94%A8%E5%9F%9F%E6%8F%92%E6%A7%BD.svg)
+
+`v-slot="slotProps"` 可以类比这里的函数签名，和函数的参数类似，我们也可以在 `v-slot` 中使用解构：
+
+<MyComponent v-slot="{ text, count }">
+  {{ text }} {{ count }}
+</MyComponent>
