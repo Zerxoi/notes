@@ -830,4 +830,223 @@ const open = ref(false)
 
 当一个组件实例从 DOM 上移除但因为被 `<KeepAlive>` 缓存而仍作为组件树的一部分时，它将变为不活跃状态(`deactivated`)而不是被卸载(`unmounted`)。当一个组件实例作为缓存树的一部分插入到 DOM 中时，它将重新被激活(`activated`)。
 
-一个持续存在的组件可以通过 `onActivated()` 和 `onDeactivated()` 注册相应的两个状态的生命周期钩子：
+一个持续存在的组件可以通过 `onActivated()` 和 `onDeactivated()` 注册相应的两个状态的生命周期钩子。
+
+## `<Transition>`
+
+Vue 提供了 `<Transition>` 用于帮助制作基于状态变化的过渡和动画。`<Transition>` 会在一个元素或组件进入和离开 DOM 时应用动画。
+
+`<Transition> `是一个内置组件，这意味着它在任意别的组件中都可以被使用，无需注册。它可以将进入和离开动画应用到通过默认插槽传递给它的元素或组件上。进入或离开可以由以下的条件之一触发：
+
+- 由 `v-if` 所带来的条件渲染
+- 由 `v-show` 所带来的条件显示
+- 由特殊元素 `<component>` 切换的动态组件
+
+当一个 `<Transition> `组件中的元素被插入或移除时，会发生下面这些事情：
+
+1. Vue 会自动检测目标元素是否应用了 CSS 过渡或动画。如果是，则一些 CSS 过渡 class 会在适当的时机被添加和移除。
+2. 如果有作为监听器的 JavaScript 钩子，这些钩子函数会在适当时机被调用。
+3. 如果没有探测到 CSS 过渡或动画、没有提供 JavaScript 钩子，那么 DOM 的插入、删除操作将在浏览器的下一个动画帧上执行。
+
+### 基于CSS的过度
+
+一共有 6 个应用于进入与离开过渡效果的 CSS class。
+
+![CSS过渡class](imgs/CSS过渡clas.png)
+
+1. `v-enter-from`：进入动画的起始状态。在元素插入之前添加，在元素插入完成后的下一帧移除。
+2. `v-enter-active`：进入动画的生效状态。应用于整个进入动画阶段。在元素被插入之前添加，在过渡或动画完成之后移除。这个 class 可以被用来定义进入动画的持续时间、延迟与速度曲线类型。
+3. `v-enter-to`：进入动画的结束状态。在元素插入完成后的下一帧被添加 (也就是 v-enter-from 被移除的同时)，在过渡或动画完成之后移除。
+4. `v-leave-from`：离开动画的起始状态。在离开过渡效果被触发时立即添加，在一帧后被移除。
+5. `v-leave-active`：离开动画的生效状态。应用于整个离开动画阶段。在离开过渡效果被触发时立即添加，在过渡或动画完成之后移除。这个 class 可以被用来定义离开动画的持续时间、延迟与速度曲线类型。
+6. `v-leave-to`：离开动画的结束状态。在一个离开动画被触发后的下一帧被添加 (也就是 v-leave-from 被移除的同时)，在过渡或动画完成之后移除。
+
+#### 为过渡命名
+
+可以通过一个 `name` prop 来声明一种过渡：
+
+```vue
+<Transition name="fade">
+  ...
+</Transition>
+```
+
+对于一个已命名的过渡，它的过渡相关 class 会以其名字而不是 `v` 作为前缀。比如，上方例子中被应用的 class 将会是 `fade-enter-active` 而不是 `v-enter-active`。
+
+#### 自定义过渡 class
+
+你也可以向 `<Transition>` 传递以下的 props 来指定自定义的过渡 class：
+
+- `enter-from-class`
+- `enter-active-class`
+- `enter-to-class`
+- `leave-from-class`
+- `leave-active-class`
+- `leave-to-class`
+
+传入的这些 class 会覆盖相应阶段的默认 class 名。这个功能在你想要在 Vue 的动画机制下集成其他的第三方 CSS 动画库时非常有用，比如 [Animate.css](https://animate.style/)：
+
+### JavaScript 钩子
+
+你可以通过监听 `<Transition>` 组件事件的方式在过渡过程中挂上钩子函数：
+
+```html
+<Transition
+  @before-enter="onBeforeEnter"
+  @enter="onEnter"
+  @after-enter="onAfterEnter"
+  @enter-cancelled="onEnterCancelled"
+  @before-leave="onBeforeLeave"
+  @leave="onLeave"
+  @after-leave="onAfterLeave"
+  @leave-cancelled="onLeaveCancelled"
+>
+  <!-- ... -->
+</Transition>
+```
+
+```typescript
+// 在元素被插入到 DOM 之前被调用
+// 用这个来设置元素的 "enter-from" 状态
+function onBeforeEnter(el) {},
+
+// 在元素被插入到 DOM 之后的下一帧被调用
+// 用这个来开始进入动画
+function onEnter(el, done) {
+  // 调用回调函数 done 表示过渡结束
+  // 如果与 CSS 结合使用，则这个回调是可选参数
+  done()
+}
+
+// 当进入过渡完成时调用。
+function onAfterEnter(el) {}
+function onEnterCancelled(el) {}
+
+// 在 leave 钩子之前调用
+// 大多数时候，你应该只会用到 leave 钩子
+function onBeforeLeave(el) {}
+
+// 在离开过渡开始时调用
+// 用这个来开始离开动画
+function onLeave(el, done) {
+  // 调用回调函数 done 表示过渡结束
+  // 如果与 CSS 结合使用，则这个回调是可选参数
+  done()
+}
+
+// 在离开过渡完成、
+// 且元素已从 DOM 中移除时调用
+function onAfterLeave(el) {}
+
+// 仅在 v-show 过渡中可用
+function leaveCancelled(el) {}
+```
+
+这些钩子可以与 CSS 过渡或动画结合使用，也可以单独使用。
+
+在使用仅由 JavaScript 执行的动画时，最好是添加一个 `:css="false"` prop。这显式地向 Vue 表明跳过对 CSS 过渡的自动探测。除了性能稍好一些之外，还可以防止 CSS 规则意外地干扰过渡。
+
+```vue
+<Transition :css="false">
+  ...
+</Transition>
+```
+
+在有了 `:css="false"` 后，我们就自己全权负责控制什么时候过渡结束了。这种情况下对于 `@enter` 和 `@leave` 钩子来说，回调函数 `done` 就是必须的。否则，钩子将被同步调用，过渡将立即完成。
+
+JavaScript 钩子可以使用 [GreenSock](https://greensock.com/) 或者 [Anime.js](https://animejs.com/) 库来获取需要的动画效果。
+
+#### 出现时过渡
+
+如果你想在某个节点初次渲染时应用一个过渡效果，你可以添加 `appear` attribute：
+
+```vue
+<Transition appear>
+  ...
+</Transition>
+```
+
+## `<TransitionGroup>`
+
+<TransitionGroup> 是一个内置组件，设计用于呈现一个列表中的元素或组件的插入、移除和顺序改变的动画效果。
+
+`<TransitionGroup>` 支持和 `<Transition>` 基本相同的 prop、CSS 过渡 class 和 JavaScript 钩子监听器，但有以下几点区别：
+
+- 默认情况下，它不会渲染一个包装器元素。但你可以通过传入 `tag` prop 来指定一个元素作为包装器元素来渲染。
+- 过渡模式（即先执行元素的离开动画，之后在执行元素的进入动画）在这里不可用，因为我们不再是在互斥的元素之间进行切换。
+- 其中的元素总是必须有一个独一无二的 `key` attribute。
+- CSS 过渡 class 会被应用在其中的每一个元素上，而不是这个组的容器上。
+
+### 示例
+
+这里是 `<TransitionGroup>` 对一个 `v-for` 列表应用进入 / 离开过渡的示例：
+
+```vue
+<TransitionGroup name="list" tag="ul">
+  <li v-for="item in items" :key="item">
+    {{ item }}
+  </li>
+</TransitionGroup>
+```
+
+
+```css
+.list-enter-active,
+.list-leave-active {
+  transition: all 0.5s ease;
+}
+.list-enter-from,
+.list-leave-to {
+  opacity: 0;
+  transform: translateX(30px);
+}
+```
+
+### 移动过渡
+
+上面的示例有一些明显的缺陷：当某一项被插入或移除时，它周围的元素会立即发生“跳跃”而不是平稳地移动。我们可以通过添加一些额外的 CSS 规则来解决这个问题：
+
+```css
+.list-move, /* 对移动中的元素应用的过渡 */
+.list-enter-active,
+.list-leave-active {
+  transition: all 0.5s ease;
+}
+
+.list-enter-from,
+.list-leave-to {
+  opacity: 0;
+  transform: translateX(30px);
+}
+```
+
+## 状态过度
+
+通过动画库 Vue 也同样可以给数字、SVG、背景颜色等添加过度动画。
+
+```vue
+<script setup lang='ts'>
+import { reactive, watch } from "vue";
+
+import gsap from "gsap"
+
+let num = reactive({
+    current: 0,
+    approximation: 0
+})
+
+watch(() => num.current, (newVal, oldVal) => {
+    gsap.to(num, {
+        duration: 1,
+        approximation: newVal
+    })
+})
+</script>
+
+<template>
+    <div>
+        <input v-model="num.current" step="20" type="number">
+        <div>{{ num.approximation.toFixed(0) }}</div>
+    </div>
+</template>
+```
