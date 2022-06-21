@@ -623,6 +623,8 @@ let switchTab = (tab: Tab) => {
 
 `v-slot="slotProps"` 可以类比这里的函数签名，和函数的参数类似，我们也可以在 `v-slot` 中使用解构：
 
+```vue
 <MyComponent v-slot="{ text, count }">
   {{ text }} {{ count }}
 </MyComponent>
+```
