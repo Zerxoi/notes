@@ -797,3 +797,37 @@ const open = ref(false)
 ```
 
 为 `<Teleport>` 指定的目标 `to` 期望接收一个 CSS 选择器字符串或者一个真实的 DOM 节点。这里我们其实就是让 Vue 去“传送这部分模板片段到 `body` 标签下”。
+
+## `<KeepAlive>`
+
+`<KeepAlive>` 是一个内置组件，使我们可以在动态切换多个组件时视情况缓存组件实例。
+
+默认情况下，一个活跃的组件实例会在切走后被卸载。这会导致它丢失其中所有已变化的状态。
+
+在下面的例子中，会在登录组件 `<Login>` 和 注册组件 `<Register>` 两个组件之间来回切换。
+
+```vue
+<button @click="flag = !flag">切换</button>
+<Login v-if="flag"></Login>
+<Register v-else></Register>
+```
+
+在来回尝试切换组件的时发现之前的组件状态都被重置了。
+
+在切换时创建新的组件实例通常是有用的行为，但在这个例子中，我们是的确想要组件能在非活跃状态时保留它们的状态。要解决这个问题，我们可以用内置的 `<KeepAlive>` 组件将这些动态组件包装起来：
+
+```vue
+<button @click="flag = !flag">切换</button>
+<KeepAlive include="Login">
+    <Login v-if="flag"></Login>
+    <Register v-else></Register>
+</KeepAlive>
+```
+
+`<KeepAlive>` 组件提供了 `include`， `exclude` 和 `max` 三个属性分别用户包括缓存组件、排除缓存组件和限制缓存组件的最大数目。
+
+### 缓存实例的生命周期#
+
+当一个组件实例从 DOM 上移除但因为被 `<KeepAlive>` 缓存而仍作为组件树的一部分时，它将变为不活跃状态(`deactivated`)而不是被卸载(`unmounted`)。当一个组件实例作为缓存树的一部分插入到 DOM 中时，它将重新被激活(`activated`)。
+
+一个持续存在的组件可以通过 `onActivated()` 和 `onDeactivated()` 注册相应的两个状态的生命周期钩子：
