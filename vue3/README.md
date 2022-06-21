@@ -733,3 +733,67 @@ const AsyncComp = defineAsyncComponent(() =>
 ```
 
 在初始渲染时，`<Suspense>` 将在内存中渲染其默认的插槽内容。如果在这个过程中遇到任何异步依赖，则会进入**挂起**状态。在挂起状态期间，展示的是后备内容。当所有遇到的异步依赖都完成后，`<Suspense>` 会进入**完成**状态，并将展示出默认插槽的内容。
+
+## `<Teleport>`
+
+`<Teleport>` 是一个内置组件，使我们可以将一个组件的一部分模板“传送”到该组件的 DOM 层次结构之外的 DOM 节点中。
+
+有时我们可能会遇到以下情况：组件模板的一部分在逻辑上属于它，但从视图角度来看，在 DOM 中它应该显示在 Vue 应用之外的其他地方。
+
+最常见的例子是构建一个**全屏的模态框**时。理想情况下，我们希望模态框的按钮和模态框本身是在同一个组件中，因为它们都与组件的开关状态有关。但这意味着该模态框将与按钮一起呈现，并且位于应用程序的 DOM 更深的层次结构中。在想要通过 CSS 选择器定位该模态框时非常困难。
+
+Teleport 是一种能够将我们的模板渲染至指定DOM节点，不受父级`style`、`v-show`等属性影响，但父级的 `data`、`prop` 数据依旧能够共用的技术。
+
+### 全屏模态框示例
+
+这个组件中有一个 `<button>` 按钮来触发打开模态框，和一个 `class` 名为 `.modal` 的 `<div>`，它包含了模态框的内容和一个用来关闭的按钮。
+
+```vue
+<script lang="ts" setup>
+import { ref } from 'vue'
+
+const open = ref(false)
+</script>
+
+<template>
+    <div>
+        <button @click="open = true">Open Modal</button>
+
+        <div v-if="open" class="modal">
+            <p>Hello from the modal!</p>
+            <button @click="open = false">Close</button>
+        </div>
+    </div>
+</template>
+
+<style scoped>
+.modal {
+    position: fixed;
+    border: 1px solid;
+    top: 50%;
+    left: 50%;
+    z-index: 999;
+}
+</style>
+```
+
+当在初始 HTML 结构中使用这个组件时，会有一些潜在的问题：
+
+- `position: fixed` 能够相对于视口放置的条件是：没有任何祖先元素设置了 `transform`、`perspective` 或者 `filter` 样式属性。而如果我们想要用 CSS `transform` 为组件的祖先节点设置动画，则会破坏模态框的布局结构！
+- 这个模态框的 `z-index` 被包含它的元素所制约。如果有其他元素与其祖先组件重叠并有更高的 `z-index`，则它会覆盖住我们的模态框。
+
+`<Teleport>` 提供了一个更简洁的方式来解决此类问题，使我们无需考虑那么多层 DOM 结构的问题。让我们用 `<Teleport>` 改写一下组件的 `<template>`：
+
+```html
+<div>
+    <button @click="open = true">Open Modal</button>
+    <Teleport to="body">
+    <div v-if="open" class="modal">
+        <p>Hello from the modal!</p>
+        <button @click="open = false">Close</button>
+    </div>
+    </Teleport>
+</div>
+```
+
+为 `<Teleport>` 指定的目标 `to` 期望接收一个 CSS 选择器字符串或者一个真实的 DOM 节点。这里我们其实就是让 Vue 去“传送这部分模板片段到 `body` 标签下”。
