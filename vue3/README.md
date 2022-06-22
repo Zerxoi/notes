@@ -1050,3 +1050,343 @@ watch(() => num.current, (newVal, oldVal) => {
     </div>
 </template>
 ```
+
+## `provide()` & `inject()` 依赖注入
+
+通常情况下，当我们需要从父组件向子组件传递数据时，会使用 props。想象一下这样的结构：有一些多层级嵌套的组件，形成了一颗巨大的组件树，而某个深层的子组件需要一个较远的祖先组件中的部分内容。在这种情况下，如果仅使用 props 则必须将其沿着组件链逐级传递下去，这会非常麻烦：
+
+![属性钻井](imgs/%E5%B1%9E%E6%80%A7%E9%92%BB%E4%BA%95.png)
+
+这里的 `<Footer>` 组件可能其实根本不关心这些 props，但它仍然需要定义并将它们传递下去使得 `<DeepChild>` 能访问到这些 props，如果组件链路非常长，可能会影响到更多这条路上的组件。这一过程被称为“prop drilling”（属性钻井），这似乎不太好解决。
+
+为解决这一问题，可以使用 `provide` 和 `inject`。一个父组件相对于其所有的后代组件，会作为依赖提供者。任何后代的组件树，无论层级有多深，都可以注入由父组件提供给整条链路的依赖。
+
+![provide-inject](imgs/provide-inject.png)
+
+### Provide (供给)
+
+要为组件后代供给数据，需要使用到 `provide()` 函数：
+
+```vue
+<script setup>
+import { provide } from 'vue'
+
+provide(/* 注入名 */ 'message', /* 值 */ 'hello!')
+</script>
+```
+
+如果不使用 `<script setup>`，请确保 `provide()` 是在 `setup()` 同步调用的：
+
+```js
+import { provide } from 'vue'
+
+export default {
+  setup() {
+    provide(/* 注入名 */ 'message', /* 值 */ 'hello!')
+  }
+}
+```
+
+`provide()` 函数接收两个参数。
+
+- 第一个参数被称为注入名，可以是一个字符串或是一个 Symbol。后代组件会用注入名来查找期望注入的值。一个组件可以多次调用 provide()，使用不同的注入名，注入不同的依赖值。
+- 第二个参数是供给的值，值可以是任意类型，包括响应式的状态，比如一个 `ref` 或者 `reactive` 之类的响应式对象。
+
+### Inject (注入)
+
+要注入祖先组件供给的数据，需使用 `inject()` 函数：
+
+```vue
+<script setup>
+import { inject } from 'vue'
+
+const message = inject('message')
+</script>
+```
+
+如果供给的值是一个 `ref`，注入进来的就是它本身，而不会自动解包。这使得被注入的组件保持了和供给者的响应性链接。
+
+带有响应性的供给 + 注入完整示例
+
+同样的，如果没有使用 `<script setup>`，`inject()` 需要在 `setup()` 同步调用：
+
+```js
+import { inject } from 'vue'
+
+export default {
+  setup() {
+    const message = inject('message')
+    return { message }
+  }
+}
+```
+
+默认情况下，`inject` 假设传入的注入名会被某个祖先链上的组件提供。如果该注入名的确没有任何组件提供，则会抛出一个运行时警告。
+
+如果在供给的一侧看来属性是可选提供的，那么注入时我们应该声明一个默认值，和 `props` 类似：
+
+```js
+// 如果没有祖先组件提供 "message"
+// `value` 会是 "这是默认值"
+const value = inject('message', '这是默认值')
+```
+
+在一些场景中，默认值可能需要通过调用一个函数或初始化一个类来取得。为了避免在不使用可选值的情况下进行不必要的计算或产生副作用，我们可以使用工厂函数来创建默认值：
+
+```js
+const value = inject('key', () => new ExpensiveClass())
+```
+
+## 兄弟组件传参
+
+### 借助父组件传参
+
+示例：
+
+`SiblingA` 组件将输入框的值传递给兄弟组件 `SiblingB`。
+
+```vue
+<script setup lang="ts">
+import { ref } from "vue"
+
+let siblingText = ref("")
+
+const onChange = (text: string) => {
+    siblingText.value = text
+}
+</script>
+
+<template>
+    <div>
+        <SiblingA @on-change="onChange"></SiblingA>
+        <SiblingB :text="siblingText"></SiblingB>
+    </div>
+</template>
+```
+
+```vue
+<!-- SiblingA.vue -->
+<script setup lang="ts">
+import { ref, watch } from "vue"
+
+let text = ref("")
+
+const emit = defineEmits<{
+    (e: "on-change", text: string): void
+}>()
+
+watch(text, (newVal) => {
+    emit("on-change", newVal)
+})
+</script>
+
+<template>
+    <div>
+        <input v-model="text" type="text">
+    </div>
+</template>
+```
+
+```vue
+<!-- SiblingB.vue -->
+<script setup lang="ts">
+type SiblingText = {
+    text: string
+}
+
+defineProps<SiblingText>()
+</script>
+
+<template>
+    <div>
+        {{ text }}
+    </div>
+</template>
+```
+
+### Event Bus
+
+在 Vue2 可以使用 `$emit` 传递 `$on` 监听 `$emit` 传递过来的事件，原理其实是运用了JS设计模式之发布订阅模式。
+
+编写一个事件总线：
+
+```typescript
+type EventBusClass<T> = {
+    emit: (name: T) => void
+    on: (name: T, callback: Function) => void
+}
+
+type EventKey = string | number | symbol
+
+type EventMap = {
+    [key: EventKey]: Array<Function>
+}
+
+class EventBus<T extends EventKey> implements EventBusClass<T> {
+    private map: EventMap
+
+    constructor() {
+        this.map = {}
+    }
+
+    emit(name: T, ...args: Array<any>) {
+        let callbacks: Array<Function> = this.map[name]
+        callbacks.forEach(cb => {
+            cb.apply(this, args)
+        })
+    }
+
+    on(name: T, callback: Function) {
+        let callbacks: Array<Function> = this.map[name] || [];
+        callbacks.push(callback)
+        this.map[name] = callbacks
+    }
+}
+
+export default new EventBus<EventKey>()
+```
+
+将上面的基于父组件传递参数的方式改为基于 Event Bus 的传参来实现相同的效果：
+
+```vue
+<template>
+    <div>
+        <EventBusA></EventBusA>
+        <EventBusB></EventBusB>
+    </div>
+</template>
+```
+
+```vue
+<!-- EventBusA.vue -->
+<script setup lang="ts">
+import { ref, watch } from "vue"
+import EventBus from "../../EventBus"
+
+let text = ref("")
+
+watch(text, (newVal) => {
+    EventBus.emit("on-change", newVal)
+})
+</script>
+
+<template>
+    <div>
+        <input v-model="text" type="text">
+    </div>
+</template>
+
+<style scoped lang="less">
+</style>
+```
+
+```vue
+<!-- EventBusB.vue -->
+<script setup lang="ts">
+import { ref } from "vue"
+import EventBus from "../../EventBus";
+
+let text = ref("")
+
+EventBus.on("on-change", (val: string) => {
+    text.value = val
+})
+</script>
+
+<template>
+    <div>
+        {{ text }}
+    </div>
+</template>
+
+<style scoped lang="less">
+</style>
+```
+
+### Mitt
+
+使用 Mitt 库作为 Event Bus 提供事件发布订阅功能。
+
+```typescript
+import { createApp } from 'vue'
+import App from './App.vue'
+
+import mitt, { Emitter } from 'mitt';
+
+// 为时间设置泛型以获得改进的 mitt 实例方法的类型推断。
+type Events = {
+    change: string
+}
+
+// 自定义$Bus全局属性添加到组件
+const emitter = mitt<Events>()
+
+declare module '@vue/runtime-core' {
+    export interface ComponentCustomProperties {
+        $Bus: Emitter<Events>
+    }
+}
+
+let app = createApp(App)
+
+app.config.globalProperties.$Bus = emitter
+
+app.mount('#app')
+```
+
+```vue
+<template>
+    <div>
+        <MittA></MittA>
+        <MittB></MittB>
+    </div>
+</template>
+```
+
+```vue
+<!-- MittA.vue -->
+<script setup lang="ts">
+import { ref, getCurrentInstance, watch } from "vue"
+
+let text = ref("")
+
+// Tips: getCurrentInstance 不能写在回调函数内
+const instance = getCurrentInstance()
+console.log(instance);
+
+watch(text, (newVal) => {
+    instance?.proxy?.$Bus.emit("change", newVal)
+})
+</script>
+
+<template>
+    <div>
+        <input v-model="text" type="text">
+    </div>
+</template>
+
+<style scoped lang="less">
+</style>
+```
+
+```vue
+<!-- MittB.vue -->
+<script setup lang="ts">
+import { ref, getCurrentInstance } from "vue"
+
+let text = ref("")
+
+getCurrentInstance()?.proxy?.$Bus.on("change", (val) => {
+    text.value = val
+})
+</script>
+
+<template>
+    <div>
+        {{ text }}
+    </div>
+</template>
+
+<style scoped lang="less">
+</style>
+```
