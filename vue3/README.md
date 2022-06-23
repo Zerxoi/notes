@@ -1390,3 +1390,220 @@ getCurrentInstance()?.proxy?.$Bus.on("change", (val) => {
 <style scoped lang="less">
 </style>
 ```
+
+## 组件事件
+
+### 触发与监听事件
+
+在组件的模板表达式中，可以直接使用 `$emit` 函数**触发自定义事件** (例如：在 `v-on` 的处理函数中)：
+
+```html
+<!-- MyComponent -->
+<button @click="$emit('someEvent')">click me</button>
+```
+
+父组件可以通过 `v-on` (缩写为 `@`) 来**监听事件**：
+
+```html
+<MyComponent @some-event="callback" />
+```
+
+### 事件参数
+
+有时候我们会需要在触发事件时附带一个特定的值。举个例子，我们想要 `<BlogPost>` 组件来管理文本会缩放得多大。在这个场景下，我们可以给 `$emit` 提供一个值作为额外的参数：
+
+```html
+<button @click="$emit('increaseBy', 1)">
+  Increase by 1
+</button>
+```
+
+然后我们在父组件中监听事件，我们可以先简单写一个内联的箭头函数作为监听器，此时可以访问到事件附带的参数：
+
+```html
+<MyButton @increase-by="(n) => count += n" />
+```
+
+### 声明触发的事件
+
+组件要触发的事件可以显式地通过 `defineEmits()` 宏来声明。
+
+```vue
+<script setup>
+const emit = defineEmits(['inFocus', 'submit'])
+</script>
+```
+
+返回的 `emit` 函数可以用来在 JavaScript 代码中触发事件。
+
+如果你正在搭配 `<script setup>` 使用 TypeScript，也可以使用纯类型标注来声明触发的事件：
+
+```vue
+<script setup lang="ts">
+const emit = defineEmits<{
+  (e: 'change', id: number): void
+  (e: 'update', value: string): void
+}>()
+</script>
+```
+
+### 事件校验
+
+和对 prop 添加类型校验的方式类似，所有触发的事件也可以使用对象形式来描述。
+
+要为事件添加校验，那么事件可以被赋值为一个函数，接受的参数就是抛出事件时传入 `emit` 的内容，返回一个布尔值来表明事件是否合法。
+
+```vue
+<script setup>
+const emit = defineEmits({
+  // 没有校验
+  click: null,
+
+  // 校验 submit 事件
+  submit: ({ email, password }) => {
+    if (email && password) {
+      return true
+    } else {
+      console.warn('Invalid submit event payload!')
+      return false
+    }
+  }
+})
+
+function submitForm(email, password) {
+  emit('submit', { email, password })
+}
+</script>
+```
+
+## `v-model` 与事件
+
+自定义事件可以用来创建对应 `v-model` 的自定义输入：
+
+```html
+<input v-model="searchText" />
+```
+
+和下面这段代码是等价的：
+
+```html
+<input
+  :value="searchText"
+  @input="searchText = ($event.target as HTMLInputElement).value"
+/>
+```
+
+当使用在一个组件上时，`v-model` 是这样做的：
+
+```html
+<CustomInput v-model="searchText" />
+
+<!-- v-model 的等价形式 -->
+<CustomInput
+  :modelValue="searchText"
+  @update:modelValue="newValue => searchText = newValue"
+/>
+```
+
+为了使组件能像这样工作，内部的 `<input>` 组件必须：
+
+- 绑定 `value` attribute 到 `modelValue` prop
+- 输入新的值时在 `input` 元素上触发 `update:modelValue` 事件
+
+这里是相应的代码：
+
+```vue
+<!-- CustomInput.vue -->
+<script setup lang="ts">
+defineProps<{ modelValue: string }>()
+defineEmits<{
+    (e: "update:modelValue", s: string): void
+}>()
+</script>
+
+<template>
+    <div>
+        <input :value="modelValue" @input="$emit('update:modelValue', ($event.target as HTMLInputElement).value)" />
+    </div>
+</template>
+```
+
+### `v-model` 的参数
+
+默认情况下，`v-model` 在组件上都是使用 `modelValue` 作为 prop，以 `update:modelValue` 作为对应的事件。我们可以通过给 `v-model` 指定一个参数来更改这些名字：
+
+```html
+<MyComponent v-model:title="bookTitle" />
+```
+
+在这个例子中，子组件应该有一个 `title` prop，并通过触发 `update:title` 事件更新父组件值：
+
+```vue
+<!-- MyComponent.vue -->
+<script setup>
+defineProps(['title'])
+defineEmits<{ (e: "update:title", s: string): void }>()
+</script>
+
+<template>
+  <input
+    type="text"
+    :value="title"
+    @input="$emit('update:title', ($event.target as HTMLInputElement).value)"
+  />
+</template>
+```
+
+通过使用不同的 `v-model` 的参数就可以实现多个 `v-model` 的绑定。
+
+### 处理 `v-model` 修饰符
+
+当我们在学习输入绑定时，我们知道了 `v-model` 有一些内置的修饰符，例如 `.trim`，`.number` 和 `.lazy`。然而在某些场景下，你可能想要添加自定义的修饰符。
+
+我们一起来创建一个自定义的修饰符 `capitalize` 用于将 `v-model` 绑定输入的字符串值第一个字母转为大写，同时还自定义了一个修饰符 `upper` 用于将 `v-model` 参数 `title` 全部大写：
+
+```html
+<MyModifier v-model.capitalize="modelText" v-model:title.upper="titleText" />
+```
+
+```vue
+<!-- MyModifier.vue -->
+<script setup lang="ts">
+type Props = {
+    modelValue: string,
+    modelModifiers?: { capitalize: boolean },
+    title: string,
+    titleModifiers?: { upper: boolean }
+}
+
+const props = defineProps<Props>()
+
+const emit = defineEmits<{
+    (e: "update:modelValue", s: string): void,
+    (e: "update:title", s: string): void,
+}>()
+
+function emitValue(e: Event) {
+    let value = (<HTMLInputElement>e.target).value
+    if (props.modelModifiers?.capitalize) {
+        value = value.charAt(0).toUpperCase() + value.slice(1)
+    }
+    emit('update:modelValue', value)
+}
+
+function emitTitle(e: Event) {
+    let value = (<HTMLInputElement>e.target).value
+    if (props.titleModifiers?.upper) {
+        value = value.toUpperCase()
+    }
+    emit('update:title', value)
+}
+</script>
+
+<template>
+    <div>
+        <input type="text" :value="modelValue" @input="emitValue" />
+        <input type="text" :value="title" @input="emitTitle" />
+    </div>
+</template>
+```
