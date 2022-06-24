@@ -1830,3 +1830,112 @@ app.component("Card", Card).mount('#app')
 上述代码在应用全局注册了一个事件监听器 `$Bus`、一个对象 `$filter` 和一个字符串 `$env`。这些全局变量在应用的任意组件模板上都可用，并且也可以通过任意组件实例的 `this` 访问到。
 
 还需要注意的是，为了 TypeScript 的类型提示需要对全局变量进行声明。
+
+## 插件
+
+插件是一种能为 Vue 添加全局功能的工具代码。
+
+插件可以是一个带 `install()` 方法的对象，亦或直接是一个将被用作 `install()` 方法的函数。插件选项 (`app.use()` 的第二个参数) 将会传递给插件的 `install()` 方法。
+
+```typescript
+// 对象写法
+const myPluginObj = {
+  install(app, options) {
+    // 配置此应用
+  }
+}
+
+// 函数写法
+const myPluginFunc = (app, options) {
+  // 配置此应用
+}
+```
+
+插件使用应用实例 API [`app.use()`](https://staging-cn.vuejs.org/api/application.html#app-use) 进行安装。若 `app.use()` 对同一个插件多次调用，该插件将只被安装一次。
+
+### 示例
+
+编写一个插件，所有组件都可以通过调用插件提供的方法来控制是否显示加载组件。
+
+```vue
+<!-- 加载组件 -->
+<script setup lang="ts">
+let isShow = ref<boolean>(false)
+
+function show() {
+    isShow.value = true
+}
+
+function hide() {
+    isShow.value = false
+}
+
+defineExpose({
+    show,
+    hide
+})
+</script>
+
+<template>
+    <div v-if="isShow" class="loading">
+        <div class="loading-content">Loading</div>
+    </div>
+</template>
+
+<style scoped lang="less">
+.loading {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    &-content {
+        font-size: 30px;
+        color: #fff;
+    }
+}
+</style>
+```
+
+```typescript
+// 插件
+import { App, createVNode, render, VNode } from 'vue'
+import Loading from './index.vue'
+
+export default {
+    install(app: App) {
+        // 创建虚拟DOM
+        const vnode: VNode = createVNode(Loading)
+        // 将虚拟 DOM 渲染成真实 DOM
+        render(vnode, document.body)
+        // 将组件中定义的函数放入全局变量中供所有组件使用
+        app.config.globalProperties.$loading = {
+            show: vnode.component?.exposed?.show,
+            hide: vnode.component?.exposed?.hide
+        }
+    }
+}
+```
+
+在所有组件中都可以通过调用 `globalProperties` 全局属性中提供的 `show()` 和 `hide()` 方法控制加载组件的显示：
+
+```vue
+<script setup lang="ts">
+let instance = getCurrentInstance()
+
+const showLoading = () => {
+    instance?.appContext.config.globalProperties.$loading.show()
+    setTimeout(() => {
+        instance?.appContext.config.globalProperties.$loading.hide()
+    }, 3000)
+}
+</script>
+
+<template>
+    <div>
+        <button @click="showLoading">Loading</button>
+    </div>
+</template>
+```
