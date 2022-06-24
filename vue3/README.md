@@ -1788,3 +1788,45 @@ useBase64({ el: "#img" }).then(res => console.log(res.baseUrl))
 ```
 
 推荐一个实用工具库 [VueUse](https://github.com/vueuse/vueuse)。
+
+## 全局函数和变量
+
+通过应用[实例 API](https://staging-cn.vuejs.org/api/application.html) `createApp()` 或者 `createSSRApp()` 创建的应用实例 `app` 都会暴露一个 `config` 对象，其中包含了对这个应用的配置设定。
+
+[`app.config.globalProperties`](https://staging-cn.vuejs.org/api/application.html#app-config-globalproperties) 是一个用于注册能够被应用内所有组件实例访问到的全局 property 的对象。
+
+### 用法
+
+```typescript
+// 为时间设置泛型以获得改进的 mitt 实例方法的类型推断。
+type Events = {
+    change: string
+}
+
+// 自定义$Bus全局属性添加到组件
+const emitter = mitt<Events>()
+
+declare module '@vue/runtime-core' {
+    export interface ComponentCustomProperties {
+        $Bus: Emitter<Events>,
+        $filter: { format: (str: string) => string }
+        $env: "dev"
+    }
+}
+
+let app = createApp(App)
+
+app.config.globalProperties.$Bus = emitter
+app.config.globalProperties.$filter = {
+    format(str: string): string {
+        return `真.${str}`
+    }
+}
+app.config.globalProperties.$env = "dev"
+
+app.component("Card", Card).mount('#app')
+```
+
+上述代码在应用全局注册了一个事件监听器 `$Bus`、一个对象 `$filter` 和一个字符串 `$env`。这些全局变量在应用的任意组件模板上都可用，并且也可以通过任意组件实例的 `this` 访问到。
+
+还需要注意的是，为了 TypeScript 的类型提示需要对全局变量进行声明。
