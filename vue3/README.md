@@ -1939,3 +1939,215 @@ const showLoading = () => {
     </div>
 </template>
 ```
+
+## `scoped` 原理
+
+参考：[单文件组件 CSS 功能](https://staging-cn.vuejs.org/api/sfc-css-features.html)
+
+当 `<style>` 标签带有 `scoped` attribute 的时候，它的 CSS 只会应用到当前组件的元素上。这类似于 Shadow DOM 中的样式封装。它带有一些注意事项，不过好处是不需要任何的 polyfill。Vue 中的 `scoped` 通过在 DOM 结构以及 CSS 样式上加唯一不重复的标记 `data-v-hash` 的方式，以保证唯一（而这个工作是由过 PostCSS 转译实现的），达到样式私有化模块化的目的:
+
+```vue
+<!-- ScopedStyle.vue -->
+<template>
+    <div class="example">
+        hello
+        <input />
+    </div>
+</template>
+
+<style scoped lang="less">
+.example {
+    color: red;
+}
+</style>
+```
+
+```vue
+<!-- App.vue -->
+<template>
+    <ScopedStyle class="scoped"></ScopedStyle>
+</template>
+
+<style scoped lang="less">
+.scoped {
+    input {
+        background: green;
+    }
+}
+</style>
+```
+
+转换为
+
+```vue
+<template>
+  <div class="example scoped" data-v-7f14d081="" data-v-62cf818d="">
+    hello
+    <input data-v-7f14d081="">
+  </div>
+</template>
+
+<style>
+.scoped input[data-v-62cf818d] {
+  background: green;
+}
+</style>
+```
+
+### 样式穿透（深度选择器）
+
+`App.vue` 经过 PostCSS 转义后的 `data-v-hash` 为 `data-v-62cf818d`，`ScopedStyle.vue` 对应的 `data-v-hash` 为 `data-v-7f14d081`。`App.vue` 经过 PostCSS 转移后的 CSS 会将属性 `data-v-62cf818d` 放在样式选择器 `.scoped input` 之后变为 `.scoped input[data-v-62cf818d]`。因此使用 `scoped` 后，父组件的样式将不会渗透到子组件中。
+
+处于 `scoped` 样式中的选择器如果想要做更“深度”的选择，也即：影响到子组件，可以使用 `:deep()` 这个伪类。将 `App.vue` 中的 CSS 修改后如下：
+
+```css
+.scoped {
+    :deep(input) {
+        background: green;
+    }
+}
+```
+
+经过转移后的样式为
+
+```css
+.scoped[data-v-62cf818d] input {
+  background: green;
+}
+```
+
+使用 `:deep()` 编译后的 CSS 将 `data-v-62cf818d` 提前放至父组件使其能够选择并修改子组件的样式（样式穿透）。
+
+### 插槽选择器
+
+默认情况下，作用域样式不会影响到 `<slot/>` 渲染出来的内容，因为它们被认为是父组件所持有并传递进来的。
+
+```vue
+<template>
+    <div class="example">
+        hello
+        <input />
+        <slot></slot>
+    </div>
+</template>
+
+<style scoped lang="less">
+.example {
+    color: red;
+    .a {
+        color: green;
+    }
+}
+</style>
+```
+
+使用 `:slotted` 伪类以明确地将插槽内容作为选择器的目标：
+
+```css
+.example {
+    color: red;
+
+    :slotted(.a) {
+        color: green;
+    }
+}
+```
+
+### 全局选择器
+
+如果想让其中一个样式规则应用到全局，比起另外创建一个 `<style>`，可以使用 `:global` 伪类来实现 (看下面的代码)：
+
+```vue
+<style scoped>
+:global(.red) {
+  color: red;
+}
+</style>
+```
+
+你也可以在同一个组件中同时包含作用域样式和非作用域样式：
+
+```Vue
+<style>
+/* 全局样式 */
+</style>
+
+<style scoped>
+/* 局部样式 */
+</style>
+```
+
+### 动态样式（`v-bind`)
+
+单文件组件的 `<style>` 标签支持使用 `v-bind` CSS 函数将 CSS 的值链接到动态的组件状态：
+
+```vue
+<template>
+  <div class="text">hello</div>
+</template>
+
+<script>
+export default {
+  data() {
+    return {
+      color: 'red'
+    }
+  }
+}
+</script>
+
+<style>
+.text {
+  color: v-bind(color);
+}
+</style>
+```
+
+### CSS Modules
+
+一个 `<style module>` 标签会被编译为 CSS Modules 并且将生成的 CSS class 作为 `$style` 对象暴露给组件：
+
+```vue
+<template>
+  <p :class="$style.red">This should be red</p>
+</template>
+
+<style module>
+.red {
+  color: red;
+}
+</style>
+```
+
+得出的 class 将被哈希化以避免冲突，实现了同样的将 CSS 仅作用于当前组件的效果。
+
+#### 自定义注入名称
+
+你可以通过给 `module` attribute 一个值来自定义注入 class 对象的 property 键：
+
+```vue
+<template>
+  <p :class="classes.red">red</p>
+</template>
+
+<style module="classes">
+.red {
+  color: red;
+}
+</style>
+```
+
+#### 与组合式 API 一同使用
+
+可以通过 `useCssModule` API 在 `setup()` 和 `<script setup>` 中访问注入的 class。对于使用了自定义注入名称的 `<style module>` 块，`useCssModule` 接收一个匹配的 `module` attribute 值作为第一个参数：
+
+```vue
+import { useCssModule } from 'vue'
+
+// 在 setup() 作用域中...
+// 默认情况下, 返回 <style module> 的 class 
+useCssModule()
+
+// 具名情况下, 返回 <style module="classes"> 的 class 
+useCssModule('classes')
+```
