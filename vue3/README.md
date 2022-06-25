@@ -2145,9 +2145,65 @@ export default {
 import { useCssModule } from 'vue'
 
 // 在 setup() 作用域中...
-// 默认情况下, 返回 <style module> 的 class 
+// 默认情况下, 返回 style module 的 class 
 useCssModule()
 
-// 具名情况下, 返回 <style module="classes"> 的 class 
+// 具名情况下, 返回 style module="classes" 的 class 
 useCssModule('classes')
 ```
+
+
+## Event Loop
+
+### JavaScript 执行机制
+
+JavaScript 是单线程的，单线程就意味着所有的任务都需要排队，后面的任务需要等前面的任务执行完才能执行，如果前面的任务耗时过长，后面的任务就需要一直等，一些从用户角度上不需要等待的任务就会一直等待，这个从体验角度上来讲是不可接受的，所以 JavaScript 中就出现了异步的概念。
+
+- **同步任务**：代码从上到下按顺序执行
+- **异步任务**
+    1. 宏任务
+        - `<script>`(整体代码)
+        - `setTimeout`
+        - `setInterval`
+        - UI 交互事件
+        - `postMessage`
+        - `Ajax`
+    2. 微任务
+        - `Promise.then/catch/finally`
+        - `MutationObserver`
+        - `process.nextTick`(Node.js 环境)
+
+![Event Loop](imgs/Event%20Loop.png)
+
+## NextTip
+
+由于 Vue 的数据驱动试图更新是异步的，即在修改数据时视图不会立即更新，而是等一个事件循环中所有的数据更新完毕后，再进行统一的视图更新。
+
+```vue
+<script setup lang="ts">
+import { ref, nextTick } from 'vue';
+
+const text = ref('小满开飞机')
+const dom = ref<HTMLElement>()
+
+const change = async () => {
+    text.value = '小满不开飞机'
+    console.log(dom.value?.innerText) //小满开飞机
+    await nextTick();
+    console.log(dom.value?.innerText) //小满不开飞机
+}
+</script>
+
+<template>
+    <div>
+        <div ref="dom">
+            {{ text }}
+        </div>
+        <button @click="change">change div</button>
+    </div>
+</template>
+```
+
+`nextTick` 执行顺序： `queueJob` -> `queueFlush` -> `flushJobs` -> `nextTick` 中的 `fn` 参数
+
+其中 flushJobs 负责试图更新，nextTick 函数保证了参数 `fn` 函数会在视图更新后调用。
