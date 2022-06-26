@@ -99,3 +99,63 @@ createRouter({
     // ...
 })
 ```
+
+## 编程式导航
+
+参考:[编程式导航](https://router.vuejs.org/zh/guide/essentials/navigation.html)
+
+### `router.push` 导航到不同的位置
+
+想要导航到不同的 URL，可以使用 `router.push` 方法。这个方法会向 history 栈添加一个新的记录，所以，当用户点击浏览器后退按钮时，会回到之前的 URL。
+
+当你点击 `<router-link>` 时，内部会调用这个方法，所以点击 `<router-link :to="...">` 相当于调用 `router.push(...)` ，由于属性 to 与 router.push 接受的对象种类相同，所以两者的规则完全相同。：
+
+```js
+// 字符串路径
+router.push('/users/eduardo')
+
+// 带有路径的对象
+router.push({ path: '/users/eduardo' })
+
+// 命名的路由，并加上参数，让路由建立 url
+router.push({ name: 'user', params: { username: 'eduardo' } })
+
+// 带查询参数，结果是 /register?plan=private
+router.push({ path: '/register', query: { plan: 'private' } })
+
+// 带 hash，结果是 /about#team
+router.push({ path: '/about', hash: '#team' })
+```
+
+### `router.replace` 替换当前位置
+
+它的作用类似于 `router.push`，唯一不同的是，它在导航时不会向 history 添加新记录，正如它的名字所暗示的那样——它取代了当前的条目。
+
+| 声明式                            | 编程式                |
+| --------------------------------- | --------------------- |
+| `<router-link :to="..." replace>` | `router.replace(...)` |
+
+也可以直接在传递给 `router.push` 的 `routeLocation` 中增加一个属性 `replace: true` ：
+
+```js
+router.push({ path: '/home', replace: true })
+// 相当于
+router.replace({ path: '/home' })
+```
+
+### `router.forward|back|go` 横跨历史
+
+```js
+// 向前移动一条记录，与 router.forward() 相同
+router.go(1)
+
+// 返回一条记录，与 router.back() 相同
+router.go(-1)
+
+// 前进 3 条记录
+router.go(3)
+
+// 如果没有那么多记录，静默失败
+router.go(-100)
+router.go(100)
+```
