@@ -338,3 +338,305 @@ const unsubscribe = someStore.$onAction(
 // 手动移除订阅
 unsubscribe()
 ```
+
+## 插件
+
+由于是底层 API，Pania Store可以完全扩展。 以下是您可以执行的操作列表：
+
+- 向 Store 添加新属性
+- 定义 Store 时添加新选项
+- 为 Store 添加新方法
+- 包装现有方法
+- 更改甚至取消操作
+- 实现本地存储等副作用
+- 仅适用于特定 Store
+
+使用 `pinia.use()` 将插件添加到 `pinia` 实例中。最简单的例子是通过返回一个对象为所有 Store 添加一个静态属性：
+
+```ts
+// main.ts
+// 自定义 Pinia 插件
+function MyPiniaPlugin(context: PiniaPluginContext) {
+    return {
+        foo: "bar"
+    }
+}
+
+// 向 store 添加新属性时扩展 PiniaCustomProperties 接口
+declare module 'pinia' {
+    export interface PiniaCustomProperties {
+        foo: string
+    }
+}
+
+let app = createApp(App)
+// Vue 安装 Pinia 插件
+app.use(
+    // Pinia 安装 MyPiniaPlugin 插件
+    createPinia().use(MyPiniaPlugin)
+)
+app.mount('#app')
+```
+
+在为 Pinia 安装好插件后，可以在获取 Store 后直接访问 `store.foo` 来直接获取插件添加的属性。
+
+```ts
+const store = useStore()
+store.foo // 'bar'
+```
+
+### `pinia.use()` 详解
+
+`pinia.use()` 的类型声明如下，`pinia.use()` 函数传入的插件本质上就是一个函数。函数只有一个参数，参数类型为 `PiniaPluginContext` 表示 Pinia 插件的上下文。返回值是 `PiniaCustomProperties` 和 `PiniaCustomStateProperties` 两个类型的可选属性或者不返回值。
+
+```ts
+export declare interface Pinia {
+    /**
+     * Adds a store plugin to extend every store
+     *
+     * @param plugin - store plugin to add
+     */
+    use(plugin: PiniaPlugin): Pinia;
+}
+
+/**
+ * Plugin to extend every store.
+ */
+export declare interface PiniaPlugin {
+    (context: PiniaPluginContext): Partial<PiniaCustomProperties & PiniaCustomStateProperties> | void;
+}
+
+/**
+ * Context argument passed to Pinia plugins.
+ */
+export declare interface PiniaPluginContext<Id extends string = string, S extends StateTree = StateTree, G = _GettersTree<S>, A = _ActionsTree> {
+    /**
+     * pinia instance.
+     */
+    pinia: Pinia;
+    /**
+     * Current app created with `Vue.createApp()`.
+     */
+    app: App;
+    /**
+     * Current store being extended.
+     */
+    store: Store<Id, S, G, A>;
+    /**
+     * Initial options defining the store when calling `defineStore()`.
+     */
+    options: DefineStoreOptionsInPlugin<Id, S, G, A>;
+}
+```
+
+下面看看插件函数的返回值对象会被如何处理：
+
+可见使用 `pinia.use()` 安装的插件会被添加到 `_p` 或者 `toBeInstalled` 数组中。如果是 Vue2 会直接添加到 `toBeInstalled` 数组中，而如果不过是 Vue2 的话则会先添加到 `_p` 数组中。在 Pinia 插件安装到 Vue 之后执行 `install()` 函数，`install()` 函数会将 `toBeInstalled` 数组中的组件转移到 `_p` 数组中。
+
+```ts
+let _p: Pinia['_p'] = []
+// plugins added before calling app.use(pinia)
+let toBeInstalled: PiniaPlugin[] = []
+const pinia: Pinia = markRaw({
+  install(app: App) {
+    // this allows calling useStore() outside of a component setup after
+    // installing pinia's plugin
+    setActivePinia(pinia)
+    if (!isVue2) {
+      pinia._a = app
+      app.provide(piniaSymbol, pinia)
+      app.config.globalProperties.$pinia = pinia
+      /* istanbul ignore else */
+      if (__DEV__ && IS_CLIENT) {
+        registerPiniaDevtools(app, pinia)
+      }
+      toBeInstalled.forEach((plugin) => _p.push(plugin))
+      toBeInstalled = []
+    }
+  },
+  use(plugin) {
+    if (!this._a && !isVue2) {
+      toBeInstalled.push(plugin)
+    } else {
+      _p.push(plugin)
+    }
+    return this
+  },
+})
+```
+
+在之后的过程中，Pinia 会应用所有已经安装的插件。可以看到无论是否处于开发环境，Pinia 都会将返回对象中的属性通过 `assign` 方法添加到 Pinia 的 `store` 对象中，不同的是在开发环境下还会将属性的 `key` 添加到 `store._customProperties` 来用于调试。
+
+```ts
+// apply all plugins
+pinia._p.forEach((extender) => {
+  /* istanbul ignore else */
+  if (__DEV__ && IS_CLIENT) {
+    const extensions = scope.run(() =>
+      extender({
+        store,
+        app: pinia._a,
+        pinia,
+        options: optionsForPlugin,
+      })
+    )!
+    Object.keys(extensions || {}).forEach((key) =>
+      store._customProperties.add(key)
+    )
+    assign(store, extensions)
+  } else {
+    assign(
+      store,
+      scope.run(() =>
+        extender({
+          store,
+          app: pinia._a,
+          pinia,
+          options: optionsForPlugin,
+        })
+      )!
+    )
+  }
+})
+```
+
+### 拓充 store
+
+可以通过简单地在插件中返回它们的对象来为每个 `store` 添加属性：
+
+```js
+pinia.use(() => ({ hello: 'world' }))
+```
+
+也可以直接在 `store` 上设置属性。
+
+```js
+pinia.use(({ store }) => {
+  store.hello = 'world'
+})
+```
+
+但是这样并不能通过 devtools 来跟踪添加的属性，所以为了让 `hello` 在 devtools 中可见，需要确保将它添加到 `store._customProperties`：
+
+```js
+// 该段代码实际上与直接返回添加的属性等效
+pinia.use(({ store }) => {
+  store.hello = 'world'
+  // 确保您的打包器可以处理这个问题。 webpack 和 vite 应该默认这样做
+  if (process.env.NODE_ENV === 'development') {
+    // 添加您在 store 中设置的任何 keys
+    store._customProperties.add('hello')
+  }
+})
+```
+
+请注意，每个 store 都使用 reactive 包装，自动展开任何 Ref (ref(), computed() ， ...） 它包含了：
+
+```js
+const sharedRef = ref('shared')
+pinia.use(({ store }) => {
+  // 每个 store 都有自己的 `hello` 属性
+  store.hello = ref('secret')
+  // 它会自动展开
+  store.hello // 'secret'
+
+  // 所有 store 都共享 value `shared` 属性
+  store.shared = sharedRef
+  store.shared // 'shared'
+})
+```
+
+这就是为什么您可以在没有 .value 的情况下访问所有计算属性以及它们是响应式的原因。
+
+#### 添加新状态
+
+> 注：添加状态和上面的添加属性是不一样的
+
+如果您想将新的状态属性添加到 store 或打算在 hydration 中使用的属性，您必须在两个地方添加它：
+
+- 在 `store` 上，因此您可以使用 `store.myState` 访问它
+- 在 `store.$state` 上，因此它可以在 devtools 中使用，并且在 SSR 期间被序列化。
+
+```ts
+// 自定义 Pinia 插件
+function MyPiniaPlugin(context: PiniaPluginContext) {
+    const store = context.store;
+    // 为了正确处理 SSR，需要确保没有覆盖现有值
+    if (!store.$state.hasOwnProperty('foo')) {
+        const foo = ref('bar')
+        store.$state.foo = foo
+    }
+    // 需要将 ref 从 $state 传输到 store 以保证 store.hasError 和 store.$state.hasError 共享相同的变量
+    store.hasError = toRef(store.$state, 'foo')
+}
+
+// 向 store 添加新属性时扩展 PiniaCustomProperties 接口
+declare module 'pinia' {
+    export interface PiniaCustomProperties {
+        foo: string,
+    }
+}
+```
+
+### 添加新的外部属性
+
+当添加**外部属性**、**来自其他库的类实例**或仅仅是**非响应式的东西**时，您应该在将对象传递给 pinia 之前使用 `markRaw()` 包装对象。 这是一个将路由添加到每个 store 的示例：
+
+```js
+import { markRaw } from 'vue'
+// 根据您的路由所在的位置进行调整
+import { router } from './router'
+
+pinia.use(({ store }) => {
+  store.router = markRaw(router)
+})
+```
+
+### 在插件中调用 `$subscribe`
+您也可以在插件中使用 `store.$subscribe` 和 `store.$onAction`：
+
+```js
+pinia.use(({ store }) => {
+  store.$subscribe(() => {
+    // 在存储变化的时候执行
+  })
+  store.$onAction(() => {
+    // 在 action 的时候执行
+  })
+})
+```
+
+### Pinia 持久化插件示例
+
+```ts
+import { PiniaPluginContext } from "pinia"
+
+const __piniaKey = '__PINIAKEY__'
+
+// 定义入参类型
+type Options = {
+    key?: string
+}
+
+// 将数据存在本地
+const setStorage = (key: string, value: any): void => {
+    localStorage.setItem(key, JSON.stringify(value))
+}
+
+
+// 存缓存中读取
+const getStorage = (key: string) => {
+    return (localStorage.getItem(key) ? JSON.parse(localStorage.getItem(key) as string) : {})
+}
+
+const StoragePlugin = (options: Options) => {
+    return (context: PiniaPluginContext) => {
+        const { store } = context;
+        const data = getStorage(`${options?.key ?? __piniaKey}-${store.$id}`)
+        store.$subscribe(() => {
+            setStorage(`${options?.key ?? __piniaKey}-${store.$id}`, toRaw(store.$state));
+        })
+        return data
+    }
+}
+```
