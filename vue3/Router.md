@@ -159,3 +159,88 @@ router.go(3)
 router.go(-100)
 router.go(100)
 ```
+
+
+## 路由传参
+
+## query 参数与 params 参数
+
+通过 Vue Router 中路由器 `push()` 和 `replace()` 函数可以传递 `query` 和 `params` 参数。
+
+```js
+const router = useRouter()
+
+// 命名的路由，并加上参数，让路由建立 url
+// params 参数需要与路由 name 联用，不能与 path 联用
+router.push({ name: 'user', params: { username: 'eduardo' } })
+
+// 带查询参数，结果是 /register?plan=private
+router.push({ path: '/register', query: { plan: 'private' } })
+```
+
+在 Vue3 的组合 API 中路由参数会从 `useRoute()` 函数获取到的路由对象的 `query` 和 `params` 属性中分别获取 query 和 params 参数。
+
+```js
+const route = useRoute()
+
+// 获取路由 params 参数
+route.params.username
+// 获取路由 query 参数
+route.query.plan
+```
+
+### 动态路由
+
+很多时候，我们需要将给定匹配模式的路由映射到同一个组件。例如，我们可能有一个 `User` 组件，它应该对所有用户进行渲染，但用户 ID 不同。在 Vue Router 中，我们可以在路径中使用一个动态字段来实现，我们称之为 路径参数 ：
+
+```ts
+
+const User = {
+  template: '<div>User</div>',
+}
+
+// 这些都会传递给 `createRouter`
+const routes: RouteRecordRaw[] = [
+  // 动态字段以冒号开始
+  {
+    path: '/users/:id',
+    name: 'user',
+    component: User
+  },
+]
+```
+
+现在像 `/users/johnny` 和 `/users/jolyne` 这样的 URL 都会映射到同一个路由。
+
+路由器通过如下形式传递动态参数：
+
+```js
+// 动态参数传递
+router.push({
+    name: "user",
+    params: {
+        id: 123
+    }
+})
+```
+
+路径参数 用冒号 `:` 表示。当一个路由被匹配时，它的 `params` 的值将在每个组件中以 `useRoute().params` 的形式暴露出来。
+
+```ts
+// 组合 API 获取路由
+const route = useRoute()
+// 动态参数接收
+route.params.id
+```
+
+### 响应路由参数的变化
+
+要对同一个组件中参数的变化做出响应的话，你可以简单地 watch `route` 对象上的任意属性，在这个场景中，就是 `route.params.id` ：
+
+```ts
+const route = useRoute()
+
+watch(() => route.params.id, (val) => {
+    itemInfo.item = data.find(item => item.id === Number(val))
+})
+```
