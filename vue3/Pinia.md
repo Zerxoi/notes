@@ -151,3 +151,190 @@ export default {
   },
 }
 ```
+
+## Getters
+
+Getter 完全等同于 Store 状态的 计算值。 它们可以用 `defineStore()` 中的 `getters` 属性定义。
+
+### getters 定义
+
+接收“状态”作为第一个参数以鼓励箭头函数的使用：
+
+```js
+export const useStore = defineStore('main', {
+  state: () => ({
+    counter: 0,
+  }),
+  getters: {
+    doubleCount: (state) => state.counter * 2,
+  },
+})
+```
+
+大多数时候，`getter` 只会依赖 `state`，但是，他们可能需要使用**其他 `getter`**。这样就需要在在定义常规函数时通过 `this` 访问到整个 `store` 的实例， 但是需要定义返回类型（在 TypeScript 中）。
+
+```js
+export const useStore = defineStore('main', {
+  state: () => ({
+    counter: 0,
+  }),
+  getters: {
+    // 自动将返回类型推断为数字
+    doubleCount(state) {
+      return state.counter * 2
+    },
+    // 返回类型必须明确设置
+    doublePlusOne(): number {
+      return this.doubleCount + 1
+    },
+  },
+})
+```
+
+然后你可以直接在 `store` 实例上访问 `getter`：
+
+```vue
+<template>
+  <p>Double count is {{ store.doubleCount }}</p>
+</template>
+
+<script>
+export default {
+  setup() {
+    const store = useStore()
+
+    return { store }
+  },
+}
+</script>
+```
+
+### 将参数传递给 getter
+
+Getters 只是幕后的 `computed` 属性，因此无法向它们传递任何参数。 但是，您可以从 `getter` 返回一个函数以接受任何参数：
+
+```js
+export const useStore = defineStore('main', {
+  getters: {
+    getUserById: (state) => {
+      return (userId) => state.users.find((user) => user.id === userId)
+    },
+  },
+})
+```
+
+并在组件中使用：
+
+```vue
+<script>
+export default {
+  setup() {
+    const store = useStore()
+
+    return { getUserById: store.getUserById }
+  },
+}
+</script>
+
+<template>
+  <p>User 2: {{ getUserById(2) }}</p>
+</template>
+```
+
+请注意，在执行此操作时，`getter` 不再缓存，它们只是您调用的函数。 但是，您可以在 `getter` 本身内部缓存一些结果，这并不常见，但应该证明性能更高：
+
+```js
+export const useStore = defineStore('main', {
+  getters: {
+    getActiveUserById(state) {
+      const activeUsers = state.users.filter((user) => user.active)
+      return (userId) => activeUsers.find((user) => user.id === userId)
+    },
+  },
+})
+```
+
+### 访问其他 Store 的getter
+
+要使用其他存储 getter，您可以直接在 `getter` 内部使用它：
+
+```js
+import { useOtherStore } from './other-store'
+
+export const useStore = defineStore('main', {
+  state: () => ({
+    // ...
+  }),
+  getters: {
+    otherGetter(state) {
+      const otherStore = useOtherStore()
+      return state.localData + otherStore.data
+    },
+  },
+})
+```
+
+## Actions
+
+Actions 相当于组件中的 `methods`。它们可以使用 `defineStore()` 中的 `actions` 属性定义，并且它们非常适合定义业务逻辑：
+
+```js
+export const useMainStore = defineStore('main', {
+  state: () => ({
+    counter: 99,
+  }),
+
+  actions: {
+    increment() {
+      this.counter++
+    },
+    async getLoginInfo() {
+      let loginInfo = await login()
+      console.log(loginInfo.username)
+    }
+  },
+})
+```
+
+与 `getters` 一样，操作可以通过 `this` 访问整个 `store` 示例并提供完整类型支持。 与它们不同，`actions` 可以是异步的，您可以在其中 `await` 任何 API 调用甚至其他操作！
+
+### 订阅 Actions
+
+可以使用 `store.$onAction()` 订阅 `action` 及其结果。 传递给它的回调在 `action` 之前执行。`after` 处理 `Promise` 并允许您在 `action` 完成后执行函数。 `以类似的方式，onError` 允许您在处理中抛出错误。
+
+```js
+const unsubscribe = someStore.$onAction(
+  ({
+    name, // action 的名字
+    store, // store 实例
+    args, // 调用这个 action 的参数
+    after, // 在这个 action 执行完毕之后，执行这个函数
+    onError, // 在这个 action 抛出异常的时候，执行这个函数
+  }) => {
+    // 记录开始的时间变量
+    const startTime = Date.now()
+    // 这将在 `store` 上的操作执行之前触发
+    console.log(`Start "${name}" with params [${args.join(', ')}].`)
+
+    // 如果 action 成功并且完全运行后，after 将触发。
+    // 它将等待任何返回的 promise
+    after((result) => {
+      console.log(
+        `Finished "${name}" after ${
+          Date.now() - startTime
+        }ms.\nResult: ${result}.`
+      )
+    })
+
+    // 如果 action 抛出或返回 Promise.reject ，onError 将触发
+    onError((error) => {
+      console.warn(
+        `Failed "${name}" after ${Date.now() - startTime}ms.\nError: ${error}.`
+      )
+    })
+  }
+)
+
+// 手动移除订阅
+unsubscribe()
+```
