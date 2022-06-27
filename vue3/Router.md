@@ -441,3 +441,157 @@ const routes = [
   },
 ]
 ```
+
+## 导航守卫
+
+正如其名，vue-router 提供的导航守卫主要用来通过跳转或取消的方式守卫导航。这里有很多方式植入路由导航中：全局的，单个路由独享的，或者组件级的。
+
+### 全局前置守卫
+
+你可以使用 `router.beforeEach` 注册一个全局前置守卫：
+
+```js
+const router = createRouter({ ... })
+
+router.beforeEach((to, from) => {
+  // ...
+  // 返回 false 以取消导航
+  return false
+})
+```
+
+当一个导航触发时，全局前置守卫按照创建顺序调用。守卫是异步解析执行，此时导航在所有守卫 resolve 完之前一直处于**等待中**。
+
+每个守卫方法接收两个参数：
+
+- `to`: 即将要进入的目标 用一种标准化的方式
+- `from`: 当前导航正要离开的路由 用一种标准化的方式
+
+可以返回的值如下:
+
+- `false`: 取消当前的导航。如果浏览器的 URL 改变了(可能是用户手动或者浏览器后退按钮)，那么 URL 地址会重置到 from 路由对应的地址。
+- 一个路由地址: 通过一个路由地址跳转到一个不同的地址，就像你调用 `router.push()` 一样，你可以设置诸如 `replace: true` 或 `name: 'home'` 之类的配置。当前的导航被中断，然后进行一个新的导航，就和 `from` 一样。
+- 如果什么都没有，`undefined`  或返回 `true`，则导航是有效的，并调用下一个导航守卫
+
+```js
+const whiteList = ['/']
+router.beforeEach((to, from) => {
+    app.config.globalProperties.$bar.startLoading()
+    if (whiteList.includes(to.path) || localStorage.getItem('token')) {
+        return true
+    } else {
+        return '/'
+    }
+})
+```
+
+在之前的 Vue Router 版本中，也是可以使用 第三个参数 `next` 的。这是一个常见的错误来源，可以通过 RFC 来消除错误。所以不建议使用。
+
+### 全局后置钩子
+
+使用场景一般可以用来做 LoadingBar。
+
+你也可以注册全局后置钩子，然而和守卫不同的是，这些钩子不会接受 `next` 函数也不会改变导航本身：
+
+```js
+router.afterEach((to, from) => {
+  sendToAnalytics(to.fullPath)
+})
+```
+
+LoadingBar 组件如下：
+
+```vue
+<script setup lang="ts">
+const speed = ref(1)
+const timer = ref(0)
+
+const bar = ref<HTMLElement>()
+
+const startLoading = () => {
+    let dom = bar.value as HTMLElement
+    timer.value = window.requestAnimationFrame(function fn() {
+        if (speed.value < 90) {
+            speed.value++
+            dom.style.width = speed.value + '%'
+            timer.value = window.requestAnimationFrame(fn)
+        } else {
+            speed.value = 1;
+            window.cancelAnimationFrame(timer.value)
+        }
+    })
+}
+
+const endLoading = () => {
+    let dom = bar.value as HTMLElement
+    window.requestAnimationFrame(() => {
+        speed.value = 100
+        dom.style.width = speed.value + '%';
+    })
+}
+
+defineExpose({
+    startLoading,
+    endLoading
+})
+</script>
+
+<template>
+    <div class="wrap">
+        <div ref="bar" class="bar"></div>
+    </div>
+</template>
+
+<style scoped lang="less">
+.wrap {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+
+    .bar {
+        height: 1px;
+        width: 0;
+        background: red;
+    }
+}
+</style>
+```
+
+将组件封装成一个插件 
+
+```ts
+import { App, createVNode, render, VNode } from 'vue'
+import Loading from './index.vue'
+
+export default {
+    install(app: App) {
+        // 创建虚拟DOM
+        const vnode: VNode = createVNode(Loading)
+        // 将虚拟 DOM 渲染成真实 DOM
+        render(vnode, document.body)
+        // 将组件中定义的函数放入全局变量中供所有组件使用
+        app.config.globalProperties.$bar = {
+            startLoading: vnode.component?.exposed?.startLoading,
+            endLoading: vnode.component?.exposed?.endLoading
+        }
+    }
+}
+```
+
+在安装完插件 `app.use(LoadingBar)` 之后在分别全局前置守卫和后置钩子调用 `startLoading` 和 `endLoading` 函数。
+
+```ts
+router.beforeEach((to, from) => {
+    app.config.globalProperties.$bar.startLoading()
+    if (whiteList.includes(to.path) || localStorage.getItem('token')) {
+        return
+    } else {
+        return '/'
+    }
+})
+
+router.afterEach((to, from) => {
+    app.config.globalProperties.$bar.endLoading()
+})
+```
