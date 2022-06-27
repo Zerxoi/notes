@@ -595,3 +595,55 @@ router.afterEach((to, from) => {
     app.config.globalProperties.$bar.endLoading()
 })
 ```
+
+## 路由元信息
+
+通过路由记录的 `meta` 属性可以定义路由的**元信息**。使用路由元信息可以在路由中附加自定义的数据，例如：
+
+- 权限校验标识。
+- 路由组件的过渡名称。
+- 路由组件持久化缓存 (keep-alive) 的相关配置。
+- 标题名称
+
+```ts
+const routes: RouteRecordRaw[] = [
+    {
+        path: "/",
+        name: "Login",
+        meta: {
+            title: '登录'
+        },
+        component: () => import("../components/Router/RouterLogin.vue")
+    },
+    {
+        path: "/register",
+        name: "Register",
+        meta: {
+            title: '注册'
+        },
+        component: () => import("../components/Router/RouterRegister.vue")
+    },
+    {
+        path: "/detail/:id",
+        name: "Detail",
+        component: () => import("../components/Router/RouterDetail.vue")
+    },
+]
+```
+
+我们可以在**导航守卫**或者是**路由对象**中访问路由的元信息数据。
+
+
+```ts
+declare module 'vue-router' {
+    interface RouteMeta {
+        // 是可选的
+        title?: string
+    }
+}
+
+router.beforeEach((to, from) => {
+    document.title = to.meta.title || "Vue Demo"
+    return true
+})
+```
