@@ -647,3 +647,55 @@ router.beforeEach((to, from) => {
     return true
 })
 ```
+
+## 过渡动效
+
+```ts
+const routes: RouteRecordRaw[] = [
+    {
+        path: "/",
+        name: "Login",
+        meta: {
+            title: '登录',
+            transition: "animate__fadeInUp",
+        },
+        component: () => import("../components/Router/RouterLogin.vue")
+    },
+    {
+        path: "/register",
+        name: "Register",
+        meta: {
+            title: '注册',
+            transition: "animate__bounceIn",
+        },
+        component: () => import("../components/Router/RouterRegister.vue")
+    },
+    {
+        path: "/detail/:id",
+        name: "Detail",
+        component: () => import("../components/Router/RouterDetail.vue")
+    },
+]
+```
+
+想要在你的路径组件上使用转场，并对导航进行动画处理，你需要使用 v-slot API，其中 Component 表示要传递给 `<component>` 的 VNodes 是 `prop`，`route` 是解析出的标准化路由地址。
+
+```vue
+<RouterView v-slot="{Component, route }">
+    <Transition :enter-active-class="`animate__animated ${route.meta.transition ?? 'animate__shakeX'}`">
+        <component :is="Component" />
+    </Transition>
+</RouterView>
+```
+
+TypeScript 声明元数据类型
+
+```ts
+declare module 'vue-router' {
+    interface RouteMeta {
+        // 是可选的
+        title?: string,
+        transition?: string
+    }
+}
+```
