@@ -163,7 +163,7 @@ router.go(100)
 
 ## 路由传参
 
-## query 参数与 params 参数
+### query 参数与 params 参数
 
 通过 Vue Router 中路由器 `push()` 和 `replace()` 函数可以传递 `query` 和 `params` 参数。
 
@@ -244,3 +244,62 @@ watch(() => route.params.id, (val) => {
     itemInfo.item = data.find(item => item.id === Number(val))
 })
 ```
+
+## 嵌套路由
+
+一些应用程序的 UI 由多层嵌套的组件组成。在这种情况下，URL 的片段通常对应于特定的嵌套组件结构，例如：
+
+```txt
+/user/johnny/profile                     /user/johnny/posts
++------------------+                  +-----------------+
+| User             |                  | User            |
+| +--------------+ |                  | +-------------+ |
+| | Profile      | |  +------------>  | | Posts       | |
+| |              | |                  | |             | |
+| +--------------+ |                  | +-------------+ |
++------------------+                  +-----------------+
+```
+
+通过 Vue Router，你可以使用嵌套路由配置来表达这种关系。例如，在 User 组件的模板内添加一个 `<RouterView>` 来实现嵌套路由：
+
+```vue
+<!-- User.vue -->
+<template>
+    <div>
+        <h2>User {{ $route.params.id }}</h2>
+        <RouterView></RouterView>
+    </div>
+</template>
+```
+
+要将组件渲染到这个嵌套的 `<RouterView>` 中，我们需要在路由中配置 `children`：
+
+```ts
+const routes: RouteRecordRaw[] = [
+    {
+        path: "/user/:id",
+        component: () => import("../components/Router/User.vue"),
+        children: [
+            // 当 /user/:id 匹配成功
+            // UserHome 将被渲染到 User 的 <router-view> 内部
+            {
+                path: '',
+                component: () => import("../components/Router/UserHome.vue")
+            },
+            {
+                // 当 /user/:id/profile 匹配成功
+                // UserProfile 将被渲染到 User 的 <router-view> 内部
+                path: 'profile',
+                component: () => import("../components/Router/UserProfile.vue"),
+            },
+            {
+                // 当 /user/:id/posts 匹配成功
+                // UserPosts 将被渲染到 User 的 <router-view> 内部
+                path: 'posts',
+                component: () => import("../components/Router/UserPosts.vue"),
+            }
+        ]
+    },
+]
+```
+
