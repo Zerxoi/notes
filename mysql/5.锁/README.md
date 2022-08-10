@@ -88,7 +88,15 @@ UNLOCK tables;
 -- 修改成功
 UPDATE `test` SET `num` = '4' WHERE (`id` = '4');
 ```
+####  插入意向锁
 
+`INSERT` 语句在执行插入之前，会先在 gap 中加入**插入意向锁**。如果是唯一索引，还会进行 Duplicate Key 判断，如果存在相同 Key 且该 Key 被加了互斥锁，则还会加共享锁，然后等待（因为这个相同的 Key 之后有可能会回滚删除，这里非常容易死锁）。等到成功插入后，会在这条记录上加**排他(X)记录锁**。
+
+插入意向锁详细参考：
+
+1. [论 MySql InnoDB 如何通过插入意向锁控制并发插入](https://juejin.cn/post/6844903666856493064)
+2. [故障分析 | MySQL Insert 加锁与死锁分析](https://opensource.actionsky.com/20190331-mysql-insert/)
+3. [MySQL InnoDB中的锁-插入意向锁（Insert Intention Lock）](https://developer.aliyun.com/article/873307)
 ### 锁的信息
 
 > 注：要求MySQL版本大于8.0
